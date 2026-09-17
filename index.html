@@ -1,0 +1,2559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Meadow — First Person</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #05131c;
+    color: #cfe9f2;
+    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  #gl {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+  }
+  /* --- crosshair --- */
+  #cross {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    width: 18px;
+    height: 18px;
+    margin: -9px 0 0 -9px;
+    opacity: 0;
+    transition: opacity .35s ease;
+  }
+  #cross.on { opacity: .55; }
+  #cross.aim { opacity: .95; transform: scale(1.35); }
+  #cross.aim::before, #cross.aim::after {
+    background: #ffe9a8;
+    box-shadow: 0 0 8px #ffc84f;
+  }
+  #cross::before, #cross::after {
+    content: "";
+    position: absolute;
+    background: #bff4ff;
+    box-shadow: 0 0 6px #4fd8ff;
+  }
+  #cross::before { left: 8px; top: 0; width: 2px; height: 18px; }
+  #cross::after  { top: 8px; left: 0; height: 2px; width: 18px; }
+
+  /* --- start card --- */
+  #card {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(520px, 88vw);
+    padding: 30px 34px 26px;
+    text-align: center;
+    background: rgba(6, 24, 34, .74);
+    border: 1px solid rgba(90, 226, 255, .28);
+    border-radius: 14px;
+    box-shadow: 0 0 60px rgba(0, 0, 0, .6), inset 0 0 40px rgba(30, 120, 160, .12);
+    backdrop-filter: blur(6px);
+    pointer-events: auto;
+    cursor: pointer;
+    transition: opacity .4s ease, transform .4s ease;
+  }
+  #card.hidden {
+    opacity: 0;
+    transform: translate(-50%, -46%) scale(.97);
+    pointer-events: none;
+  }
+  #card h1 {
+    margin: 0 0 6px;
+    font-size: 30px;
+    font-weight: 300;
+    letter-spacing: .32em;
+    text-transform: uppercase;
+    color: #d8fbff;
+    text-shadow: 0 0 24px rgba(80, 220, 255, .55);
+  }
+  #card .sub {
+    margin: 0 0 22px;
+    font-size: 12px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    color: rgba(160, 220, 240, .6);
+  }
+  #keys {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 8px 16px;
+    text-align: left;
+    font-size: 13px;
+    color: rgba(200, 235, 245, .82);
+    margin: 0 auto 22px;
+    width: fit-content;
+  }
+  #keys b {
+    font-weight: 600;
+    color: #8fe9ff;
+    letter-spacing: .06em;
+  }
+  #card .go {
+    display: inline-block;
+    padding: 10px 26px;
+    font-size: 13px;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: #061a24;
+    background: linear-gradient(180deg, #86ecff, #34bfe0);
+    border-radius: 999px;
+    box-shadow: 0 0 26px rgba(76, 214, 255, .45);
+  }
+  #card .note {
+    margin: 16px 0 0;
+    font-size: 11px;
+    color: rgba(150, 200, 220, .45);
+    letter-spacing: .05em;
+  }
+  /* Walking needs a keyboard and a lockable mouse pointer — say so up front
+     on touch devices rather than letting them tap into a frozen camera. */
+  #touchnote { display: none; }
+  @media (pointer: coarse) {
+    #keys, #card .go { display: none; }
+    #touchnote {
+      display: block;
+      margin: 4px 0 0;
+      font-size: 13px;
+      line-height: 1.6;
+      color: rgba(200, 235, 245, .8);
+    }
+  }
+
+  /* --- hud --- */
+  #hud {
+    position: fixed;
+    left: 14px;
+    bottom: 12px;
+    font-size: 11px;
+    line-height: 1.7;
+    letter-spacing: .1em;
+    color: rgba(170, 226, 245, .5);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .8);
+    opacity: 0;
+    transition: opacity .4s ease;
+  }
+  #hud.on { opacity: 1; }
+  #hint {
+    position: fixed;
+    right: 14px;
+    bottom: 12px;
+    font-size: 11px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: rgba(170, 226, 245, .38);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .8);
+    opacity: 0;
+    transition: opacity .4s ease;
+  }
+  #hint.on { opacity: 1; }
+
+  /* The open-link prompt, sitting just under the crosshair. */
+  #prompt {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, 96px);
+    padding: 7px 16px;
+    white-space: nowrap;
+    font-size: 12px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: #fff6de;
+    background: rgba(10, 26, 32, .62);
+    border: 1px solid rgba(255, 214, 130, .45);
+    border-radius: 999px;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, .9);
+    box-shadow: 0 0 22px rgba(255, 190, 90, .18);
+    opacity: 0;
+    transition: opacity .16s ease;
+  }
+  #prompt.on { opacity: 1; }
+
+  /* --- fatal error --- */
+  #fatal {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    text-align: center;
+    font-size: 14px;
+    line-height: 1.7;
+    color: #ffd9d9;
+    background: #0a0f14;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<div class="overlay">
+  <div id="cross"></div>
+  <div id="prompt"></div>
+  <div id="hud"></div>
+  <div id="hint">Esc to release cursor</div>
+</div>
+
+<div id="card">
+  <h1>Meadow</h1>
+  <p class="sub">Meadow, Lake &amp; Flying Rocks &middot; First Person</p>
+  <div id="keys">
+    <b>W A S D</b><span>Walk</span>
+    <b>Mouse</b><span>Look around</span>
+    <b>Shift</b><span>Sprint</span>
+    <b>Space</b><span>Jump</span>
+    <b>E</b><span>Open the link you are facing</span>
+    <b>N</b><span>Night &amp; stars</span>
+    <b>Esc</b><span>Release cursor</span>
+  </div>
+  <span class="go">Click to enter</span>
+  <p id="touchnote">This world is explored with a keyboard and mouse &mdash;<br>open it on a desktop browser to walk around.</p>
+  <p class="note">Everything you see is generated in your browser. No internet required.</p>
+</div>
+
+<div id="fatal"><div></div></div>
+
+<script>
+"use strict";
+(function () {
+
+/* =========================================================================
+   0. Fatal error helper
+   ========================================================================= */
+function fatal(msg) {
+  var el = document.getElementById("fatal");
+  el.firstElementChild.textContent = msg;
+  el.style.display = "flex";
+  document.getElementById("card").style.display = "none";
+  console.error(msg);
+}
+
+/* =========================================================================
+   1. Math — mat4 / vec3 (column-major, WebGL order)
+   ========================================================================= */
+var M4 = {
+  create: function () {
+    return new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]);
+  },
+  perspective: function (o, fovy, aspect, near, far) {
+    var f = 1 / Math.tan(fovy / 2), nf = 1 / (near - far);
+    o[0]=f/aspect;o[1]=0;o[2]=0;o[3]=0;
+    o[4]=0;o[5]=f;o[6]=0;o[7]=0;
+    o[8]=0;o[9]=0;o[10]=(far+near)*nf;o[11]=-1;
+    o[12]=0;o[13]=0;o[14]=2*far*near*nf;o[15]=0;
+    return o;
+  },
+  multiply: function (o, a, b) {
+    var a00=a[0],a01=a[1],a02=a[2],a03=a[3],
+        a10=a[4],a11=a[5],a12=a[6],a13=a[7],
+        a20=a[8],a21=a[9],a22=a[10],a23=a[11],
+        a30=a[12],a31=a[13],a32=a[14],a33=a[15];
+    for (var i = 0; i < 4; i++) {
+      var b0=b[i*4],b1=b[i*4+1],b2=b[i*4+2],b3=b[i*4+3];
+      o[i*4]   = b0*a00 + b1*a10 + b2*a20 + b3*a30;
+      o[i*4+1] = b0*a01 + b1*a11 + b2*a21 + b3*a31;
+      o[i*4+2] = b0*a02 + b1*a12 + b2*a22 + b3*a32;
+      o[i*4+3] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
+    }
+    return o;
+  },
+  /* Camera matrix built directly from position + yaw/pitch (cheaper than lookAt). */
+  fromEuler: function (o, px, py, pz, yaw, pitch, roll) {
+    var cy = Math.cos(yaw),   sy = Math.sin(yaw);
+    var cp = Math.cos(pitch), sp = Math.sin(pitch);
+    var cr = Math.cos(roll),  sr = Math.sin(roll);
+    // Camera basis in world space: R = Ry(yaw) * Rx(pitch) * Rz(roll)
+    var rx0 = cy*cr + sy*sp*sr, rx1 = cp*sr, rx2 = -sy*cr + cy*sp*sr;
+    var uy0 = -cy*sr + sy*sp*cr, uy1 = cp*cr, uy2 = sy*sr + cy*sp*cr;
+    var fz0 = sy*cp,             fz1 = -sp,   fz2 = cy*cp;
+    // View matrix = transpose(basis) with translation folded in.
+    o[0]=rx0; o[1]=uy0; o[2]=fz0; o[3]=0;
+    o[4]=rx1; o[5]=uy1; o[6]=fz1; o[7]=0;
+    o[8]=rx2; o[9]=uy2; o[10]=fz2; o[11]=0;
+    o[12]=-(rx0*px + rx1*py + rx2*pz);
+    o[13]=-(uy0*px + uy1*py + uy2*pz);
+    o[14]=-(fz0*px + fz1*py + fz2*pz);
+    o[15]=1;
+    return o;
+  }
+};
+
+function norm3(v) {
+  var l = Math.hypot(v[0], v[1], v[2]) || 1;
+  v[0] /= l; v[1] /= l; v[2] /= l;
+  return v;
+}
+function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function smoothstep(t) { return t * t * (3 - 2 * t); }
+
+/* =========================================================================
+   2. Seeded PRNG + value noise / fBm
+   ========================================================================= */
+function mulberry32(seed) {
+  var a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) | 0;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+var SEED = 1337;
+var rand = mulberry32(SEED);
+
+/* Permutation-hash based value noise (no tables to download, fully deterministic). */
+var PERM = new Uint8Array(512);
+(function () {
+  var p = new Uint8Array(256), i;
+  for (i = 0; i < 256; i++) p[i] = i;
+  for (i = 255; i > 0; i--) {
+    var j = (rand() * (i + 1)) | 0;
+    var t = p[i]; p[i] = p[j]; p[j] = t;
+  }
+  for (i = 0; i < 512; i++) PERM[i] = p[i & 255];
+})();
+
+function hash2(xi, yi) {
+  return PERM[(PERM[xi & 255] + (yi & 255)) & 255] / 255;
+}
+function hash3(xi, yi, zi) {
+  return PERM[(PERM[(PERM[xi & 255] + (yi & 255)) & 255] + (zi & 255)) & 255] / 255;
+}
+
+function noise2(x, y) {
+  var xi = Math.floor(x), yi = Math.floor(y);
+  var xf = x - xi, yf = y - yi;
+  var u = smoothstep(xf), v = smoothstep(yf);
+  var a = hash2(xi, yi),     b = hash2(xi + 1, yi);
+  var c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+  return lerp(lerp(a, b, u), lerp(c, d, u), v) * 2 - 1;
+}
+
+function noise3(x, y, z) {
+  var xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  var xf = x - xi, yf = y - yi, zf = z - zi;
+  var u = smoothstep(xf), v = smoothstep(yf), w = smoothstep(zf);
+  var a = lerp(lerp(hash3(xi, yi, zi),     hash3(xi + 1, yi, zi), u),
+               lerp(hash3(xi, yi + 1, zi), hash3(xi + 1, yi + 1, zi), u), v);
+  var b = lerp(lerp(hash3(xi, yi, zi + 1),     hash3(xi + 1, yi, zi + 1), u),
+               lerp(hash3(xi, yi + 1, zi + 1), hash3(xi + 1, yi + 1, zi + 1), u), v);
+  return lerp(a, b, w) * 2 - 1;
+}
+
+function fbm2(x, y, oct) {
+  var sum = 0, amp = 1, freq = 1, norm = 0;
+  for (var i = 0; i < oct; i++) {
+    sum += noise2(x * freq, y * freq) * amp;
+    norm += amp;
+    amp *= 0.5;
+    freq *= 2.03;
+  }
+  return sum / norm;
+}
+
+function fbm3(x, y, z, oct) {
+  var sum = 0, amp = 1, freq = 1, norm = 0;
+  for (var i = 0; i < oct; i++) {
+    sum += noise3(x * freq, y * freq, z * freq) * amp;
+    norm += amp;
+    amp *= 0.5;
+    freq *= 2.07;
+  }
+  return sum / norm;
+}
+
+/* =========================================================================
+   3. GL bootstrap
+   ========================================================================= */
+var canvas = document.getElementById("gl");
+var gl = canvas.getContext("webgl2", {
+  antialias: true,
+  depth: true,
+  alpha: false,
+  powerPreference: "high-performance"
+});
+if (!gl) {
+  fatal("This world needs WebGL2, and your browser did not provide it.\n" +
+        "Try a recent Chrome, Edge or Firefox — and make sure hardware acceleration is on.");
+  return;
+}
+
+function compileShader(type, src, label) {
+  var s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    fatal("Shader compile failed (" + label + "):\n" + gl.getShaderInfoLog(s));
+    throw new Error("shader " + label);
+  }
+  return s;
+}
+
+function makeProgram(vsSrc, fsSrc, label) {
+  var p = gl.createProgram();
+  gl.attachShader(p, compileShader(gl.VERTEX_SHADER, vsSrc, label + ".vert"));
+  gl.attachShader(p, compileShader(gl.FRAGMENT_SHADER, fsSrc, label + ".frag"));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    fatal("Program link failed (" + label + "):\n" + gl.getProgramInfoLog(p));
+    throw new Error("program " + label);
+  }
+  // Cache every active uniform location up front.
+  var u = {};
+  var n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (var i = 0; i < n; i++) {
+    var name = gl.getActiveUniform(p, i).name.replace(/\[0\]$/, "");
+    u[name] = gl.getUniformLocation(p, name);
+  }
+  return { id: p, u: u };
+}
+
+/* =========================================================================
+   4. World constants & palette
+   ========================================================================= */
+var WORLD = {
+  size: 620,          // terrain spans -310 .. +310 on X and Z
+  grid: 300,          // vertices per side
+  amp: 17,            // gentle park rolls, not mountains
+  eye: 1.72,          // camera height above the ground
+  walk: 6.2,
+  sprint: 12.5,
+  gravity: 26,
+  jump: 8.4,
+  far: 900
+};
+WORLD.half = WORLD.size / 2;
+WORLD.cell = WORLD.size / (WORLD.grid - 1);
+
+/* Late-afternoon spring meadow: warm low sun, blue sky, bright hazy distance. */
+var SKY_TOP    = [0.286, 0.505, 0.760];
+var SKY_MID    = [0.541, 0.706, 0.878];
+var SKY_HORIZ  = [0.847, 0.898, 0.902];
+var SUN_DIR    = norm3([0.36, 0.30, -0.88]);   // low, and behind the meadow
+var SUN_COLOR  = [1.00, 0.898, 0.678];
+var FOG_COLOR  = [0.847, 0.890, 0.847];
+
+/* =========================================================================
+   5. Terrain heightfield
+   ========================================================================= */
+var HN = WORLD.grid;
+var heights = new Float32Array(HN * HN);
+
+/* The lake sits off to the left of the spawn view, close enough to walk to. */
+var LAKE = { x: -84, z: -132, r: 54, depth: 8.5 };
+
+function terrainHeight(x, z) {
+  // Broad continent shape.
+  var h = fbm2(x * 0.0038 + 11.3, z * 0.0038 - 4.7, 5) * WORLD.amp;
+  // Soft mid-scale swells — the lawn rises and falls, it does not ridge.
+  var r = 1 - Math.abs(fbm2(x * 0.0115 - 21.9, z * 0.0115 + 8.2, 4));
+  h += (r * r) * 5 - 2.4;
+  // Fine surface roughness — dialled up so the ground never reads as a plane.
+  h += fbm2(x * 0.052, z * 0.052, 3) * 2.4;
+  h += fbm2(x * 0.145, z * 0.145, 2) * 0.7;
+  // Carve a small clearing around the spawn so you start on level ground.
+  var d = Math.hypot(x, z);
+  var bowl = 1 - smoothstep(clamp(d / 34, 0, 1));
+  h = lerp(h, h * 0.3 - 1.0, bowl * 0.8);
+  // Lift the far edge just enough that the park closes with rising ground
+  // behind the tree line instead of ending at a visible cut.
+  var rim = smoothstep(clamp((d - WORLD.half * 0.62) / (WORLD.half * 0.38), 0, 1));
+  h += rim * 22;
+
+  // Scoop out the lake basin: a smooth bowl with a wavering edge, so the
+  // shoreline is not a drawn circle.
+  var lx = x - LAKE.x, lz = z - LAKE.z;
+  var ld = Math.hypot(lx, lz);
+  var wobble = 1 + fbm2(x * 0.021 + 3.9, z * 0.021 - 6.4, 3) * 0.34;
+  var lt = clamp(ld / (LAKE.r * wobble), 0, 1);
+  var bowlL = 1 - smoothstep(lt);
+  h -= bowlL * LAKE.depth;
+  // A low bank around the rim, the spoil of the hollow.
+  h += Math.max(0, 1 - Math.abs(lt - 1.04) * 4.5) * 2.6;
+  return h;
+}
+
+(function buildHeightfield() {
+  for (var j = 0; j < HN; j++) {
+    var z = -WORLD.half + j * WORLD.cell;
+    for (var i = 0; i < HN; i++) {
+      var x = -WORLD.half + i * WORLD.cell;
+      heights[j * HN + i] = terrainHeight(x, z);
+    }
+  }
+})();
+
+/* Water surface height, fixed once the basin exists. Everything that grows
+   or walks checks against it, so nothing sprouts out of the lake. */
+var WATER_LEVEL = 0;
+
+/* Bilinear sample of the same array the mesh was built from — the single
+   source of truth for collision and every scatter placement. */
+function heightAt(x, z) {
+  var fx = (x + WORLD.half) / WORLD.cell;
+  var fz = (z + WORLD.half) / WORLD.cell;
+  if (fx < 0) fx = 0; else if (fx > HN - 1.001) fx = HN - 1.001;
+  if (fz < 0) fz = 0; else if (fz > HN - 1.001) fz = HN - 1.001;
+  var i = fx | 0, j = fz | 0;
+  var tx = fx - i, tz = fz - j;
+  var h00 = heights[j * HN + i],       h10 = heights[j * HN + i + 1];
+  var h01 = heights[(j + 1) * HN + i], h11 = heights[(j + 1) * HN + i + 1];
+  return lerp(lerp(h00, h10, tx), lerp(h01, h11, tx), tz);
+}
+
+WATER_LEVEL = heightAt(LAKE.x, LAKE.z) + LAKE.depth * 0.74;
+
+function slopeAt(x, z) {
+  var d = WORLD.cell;
+  var hx = heightAt(x + d, z) - heightAt(x - d, z);
+  var hz = heightAt(x, z + d) - heightAt(x, z - d);
+  return Math.hypot(hx, hz) / (2 * d);
+}
+
+/* =========================================================================
+   6. Terrain mesh
+   ========================================================================= */
+var terrainMesh = (function () {
+  var n = HN, count = n * n;
+  var pos = new Float32Array(count * 3);
+  var nrm = new Float32Array(count * 3);
+  var col = new Float32Array(count * 4);   // rgb + emissive
+  var k = 0, c = 0;
+
+  for (var j = 0; j < n; j++) {
+    var z = -WORLD.half + j * WORLD.cell;
+    for (var i = 0; i < n; i++) {
+      var x = -WORLD.half + i * WORLD.cell;
+      var h = heights[j * n + i];
+      pos[k] = x; pos[k + 1] = h; pos[k + 2] = z;
+
+      // Central-difference normal straight from the heightfield.
+      var hl = heights[j * n + Math.max(i - 1, 0)];
+      var hr = heights[j * n + Math.min(i + 1, n - 1)];
+      var hd = heights[Math.max(j - 1, 0) * n + i];
+      var hu = heights[Math.min(j + 1, n - 1) * n + i];
+      var nx = hl - hr, ny = 2 * WORLD.cell, nz = hd - hu;
+      var il = 1 / Math.hypot(nx, ny, nz);
+      nrm[k] = nx * il; nrm[k + 1] = ny * il; nrm[k + 2] = nz * il;
+
+      // Spring lawn: fresh yellow-green in the open, deeper green in the
+      // hollows and under the canopy line, thin earth only where it is steep.
+      var steep = clamp((1 - ny * il) * 3.4, 0, 1);
+      var alt = clamp((h + 8) / 34, 0, 1);
+      // Two independent noise fields: broad patches of growth, plus a fine
+      // mottle. Together they keep the lawn from reading as flat paint.
+      var patch = clamp(fbm2(x * 0.016 + 40.5, z * 0.016 - 17.2, 3) * 1.9 + 0.5, 0, 1);
+      var mottle = clamp(fbm2(x * 0.11, z * 0.11, 3) * 1.8 + 0.5, 0, 1);
+      var fine = noise2(x * 0.5, z * 0.5) * 0.5 + 0.5;
+
+      // base: rich mid green
+      var r = 0.243, g = 0.482, b = 0.145;
+      // sunlit sward — the bright yellow-green the light lands on
+      var lush = smoothstep(clamp((patch - 0.42) / 0.36, 0, 1)) * (1 - steep);
+      r = lerp(r, 0.529, lush);
+      g = lerp(g, 0.694, lush);
+      b = lerp(b, 0.176, lush);
+      // cool shadowed turf in the hollows
+      var shade = smoothstep(clamp((0.46 - patch) / 0.34, 0, 1)) * (1 - steep);
+      r = lerp(r, 0.121, shade * 0.85);
+      g = lerp(g, 0.317, shade * 0.85);
+      b = lerp(b, 0.145, shade * 0.85);
+      // dry warm grass on the crests where the sun bakes it
+      var dry = smoothstep(clamp((alt - 0.55) / 0.4, 0, 1)) * (1 - steep) * 0.5;
+      r = lerp(r, 0.588, dry);
+      g = lerp(g, 0.635, dry);
+      b = lerp(b, 0.243, dry);
+      // bare earth on the steep faces
+      r = lerp(r, 0.376, steep);
+      g = lerp(g, 0.321, steep);
+      b = lerp(b, 0.223, steep);
+      // Lakebed: pale silt at the waterline darkening to mud in the deep, so
+      // the shallows read as shallow through the water.
+      var wet = clamp((WATER_LEVEL + 0.30 - h) / 1.4, 0, 1);
+      var deep = clamp((WATER_LEVEL - h) / 6.5, 0, 1);
+      var silt = smoothstep(wet);
+      r = lerp(r, lerp(0.639, 0.235, deep), silt);
+      g = lerp(g, lerp(0.596, 0.290, deep), silt);
+      b = lerp(b, lerp(0.470, 0.235, deep), silt);
+      var m = 0.84 + mottle * 0.26 + fine * 0.12;
+
+      col[c]     = r * m;
+      col[c + 1] = g * m;
+      col[c + 2] = b * m;
+      col[c + 3] = 0;   // nothing on this world glows
+
+      k += 3; c += 4;
+    }
+  }
+
+  // Indices — Uint32 because 300*300 > 65k.
+  var idx = new Uint32Array((n - 1) * (n - 1) * 6);
+  var q = 0;
+  for (var jj = 0; jj < n - 1; jj++) {
+    for (var ii = 0; ii < n - 1; ii++) {
+      var a = jj * n + ii, b2 = a + 1, c2 = a + n, d2 = c2 + 1;
+      idx[q++] = a; idx[q++] = c2; idx[q++] = b2;
+      idx[q++] = b2; idx[q++] = c2; idx[q++] = d2;
+    }
+  }
+  return { pos: pos, nrm: nrm, col: col, idx: idx, count: idx.length };
+})();
+
+/* =========================================================================
+   7. Procedural geometry builders
+   ========================================================================= */
+
+/* Small mesh accumulator: positions, normals, rgb+emissive colours, indices. */
+function MeshBuilder() {
+  this.pos = [];
+  this.nrm = [];
+  this.col = [];
+  this.idx = [];
+}
+MeshBuilder.prototype.vert = function (x, y, z, nx, ny, nz, r, g, b, e) {
+  this.pos.push(x, y, z);
+  this.nrm.push(nx, ny, nz);
+  this.col.push(r, g, b, e);
+  return (this.pos.length / 3) - 1;
+};
+MeshBuilder.prototype.tri = function (a, b, c) { this.idx.push(a, b, c); };
+MeshBuilder.prototype.quad = function (a, b, c, d) { this.idx.push(a, b, c, a, c, d); };
+MeshBuilder.prototype.finish = function () {
+  return {
+    pos: new Float32Array(this.pos),
+    nrm: new Float32Array(this.nrm),
+    col: new Float32Array(this.col),
+    idx: new Uint32Array(this.idx),
+    count: this.idx.length
+  };
+};
+
+/* Unit icosphere with shared (welded) vertices, so normals come out smooth. */
+function icosphere(subdiv) {
+  var t = (1 + Math.sqrt(5)) / 2;
+  var verts = [
+    [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
+    [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
+    [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]
+  ].map(function (v) { return norm3(v.slice()); });
+
+  var faces = [
+    [0,11,5],[0,5,1],[0,1,7],[0,7,10],[0,10,11],
+    [1,5,9],[5,11,4],[11,10,2],[10,7,6],[7,1,8],
+    [3,9,4],[3,4,2],[3,2,6],[3,6,8],[3,8,9],
+    [4,9,5],[2,4,11],[6,2,10],[8,6,7],[9,8,1]
+  ];
+
+  var cache = {};
+  function mid(a, b) {
+    var key = a < b ? a + "_" + b : b + "_" + a;
+    if (cache[key] !== undefined) return cache[key];
+    var va = verts[a], vb = verts[b];
+    var v = norm3([va[0] + vb[0], va[1] + vb[1], va[2] + vb[2]]);
+    verts.push(v);
+    cache[key] = verts.length - 1;
+    return cache[key];
+  }
+  for (var s = 0; s < subdiv; s++) {
+    var next = [];
+    for (var f = 0; f < faces.length; f++) {
+      var fa = faces[f];
+      var a = mid(fa[0], fa[1]), b = mid(fa[1], fa[2]), c = mid(fa[2], fa[0]);
+      next.push([fa[0], a, c], [fa[1], b, a], [fa[2], c, b], [a, b, c]);
+    }
+    faces = next;
+  }
+  return { verts: verts, faces: faces };
+}
+
+function computeNormals(mesh) {
+  var p = mesh.pos, idx = mesh.idx, n = mesh.nrm;
+  n.fill(0);
+  for (var i = 0; i < idx.length; i += 3) {
+    var a = idx[i] * 3, b = idx[i + 1] * 3, c = idx[i + 2] * 3;
+    var ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
+    var vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
+    var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    n[a] += nx; n[a + 1] += ny; n[a + 2] += nz;
+    n[b] += nx; n[b + 1] += ny; n[b + 2] += nz;
+    n[c] += nx; n[c + 1] += ny; n[c + 2] += nz;
+  }
+  for (var v = 0; v < n.length; v += 3) {
+    var l = Math.hypot(n[v], n[v + 1], n[v + 2]) || 1;
+    n[v] /= l; n[v + 1] /= l; n[v + 2] /= l;
+  }
+}
+
+/* --- 7c. Park tree ------------------------------------------------------
+   Dark leaning trunk, a few boughs, and a crown built from overlapping
+   foliage blobs — the broad deciduous canopy the meadow sits under. */
+function buildTree(seedOffset) {
+  var mb = new MeshBuilder();
+  var so = seedOffset * 7.31;
+  var rings = 8, sides = 8;
+  var height = 11 + (noise2(so, 2.2) * 0.5 + 0.5) * 7;
+  var baseR = 0.62 + (noise2(so, 5.5) * 0.5 + 0.5) * 0.42;
+  var leanX = noise2(so + 1.1, 3.7) * 1.9;
+  var leanZ = noise2(so + 8.3, 3.7) * 1.9;
+
+  function trunkOffset(t) {
+    // Flared at the base, leaning gently as it climbs.
+    return { x: leanX * t * t, z: leanZ * t * t };
+  }
+
+  var ringStart = [];
+  for (var r = 0; r <= rings; r++) {
+    var t = r / rings;
+    var y = t * height;
+    // Strong root flare in the bottom fifth, then a slow taper.
+    var flare = 1 + Math.pow(Math.max(0, 1 - t * 9.0), 2.4) * 0.55;
+    var rad = lerp(baseR, baseR * 0.2, Math.pow(t, 0.7)) * flare;
+    var off = trunkOffset(t);
+    ringStart.push(mb.pos.length / 3);
+    for (var s = 0; s < sides; s++) {
+      var ang = s / sides * Math.PI * 2;
+      var bark = 0.86 + noise2(s * 1.7, t * 6 + so) * 0.26;
+      var shade = lerp(1.0, 0.78, t);
+      mb.vert(off.x + Math.cos(ang) * rad, y, off.z + Math.sin(ang) * rad,
+              Math.cos(ang), 0.15, Math.sin(ang),
+              0.196 * bark * shade, 0.141 * bark * shade, 0.105 * bark * shade,
+              0);
+    }
+  }
+  for (var r2 = 0; r2 < rings; r2++) {
+    for (var s3 = 0; s3 < sides; s3++) {
+      var a = ringStart[r2] + s3;
+      var b = ringStart[r2] + ((s3 + 1) % sides);
+      var c = ringStart[r2 + 1] + ((s3 + 1) % sides);
+      var d = ringStart[r2 + 1] + s3;
+      mb.quad(a, b, c, d);
+    }
+  }
+
+  /* Crown: a cluster of low-poly foliage blobs. Sun-facing sides are the
+     bright yellow-green the light comes through; undersides stay deep. */
+  var crown = icosphere(1);
+  var top = trunkOffset(1);
+  var blobs = 7;
+  for (var bl = 0; bl < blobs; bl++) {
+    var ba = (bl / blobs) * Math.PI * 2 + noise2(so, bl) * 0.7;
+    var bdist = bl === 0 ? 0 : (1.6 + (noise2(so + bl, 1.9) * 0.5 + 0.5) * 2.9);
+    var bx = top.x + Math.cos(ba) * bdist;
+    var bz = top.z + Math.sin(ba) * bdist;
+    var by = height + (bl === 0 ? 2.4 : 1.0 + (noise2(so + bl, 4.2) * 0.5 + 0.5) * 2.6);
+    var brad = 2.5 + (noise2(so + bl, 7.4) * 0.5 + 0.5) * 1.9;
+    var hueShift = noise2(so, bl * 3) * 0.06;
+
+    var base = mb.pos.length / 3;
+    for (var v = 0; v < crown.verts.length; v++) {
+      var cv = crown.verts[v];
+      var lump = 1 + fbm3(cv[0] * 1.7 + so + bl, cv[1] * 1.7, cv[2] * 1.7 - bl, 3) * 0.34;
+      var px2 = bx + cv[0] * brad * lump * 1.12;
+      var py2 = by + cv[1] * brad * lump * 0.82;
+      var pz2 = bz + cv[2] * brad * lump * 1.12;
+      // Vertical gradient through the canopy: lit crest, shadowed belly.
+      var up = clamp(cv[1] * 0.5 + 0.5, 0, 1);
+      var lr = lerp(0.043, 0.352, up) + hueShift;
+      var lg = lerp(0.156, 0.588, up) + hueShift * 0.4;
+      var lb = lerp(0.062, 0.176, up);
+      mb.vert(px2, py2, pz2, 0, 0, 0, lr, lg, lb, 0);
+    }
+    for (var f = 0; f < crown.faces.length; f++) {
+      mb.tri(base + crown.faces[f][0], base + crown.faces[f][1], base + crown.faces[f][2]);
+    }
+  }
+
+  var mesh = mb.finish();
+  computeNormals(mesh);
+  return mesh;
+}
+
+/* --- 7d. Daisy ----------------------------------------------------------
+   A small cluster of white flowers on thin stems — the white speckle that
+   runs through the whole meadow. Petals are near-white so they catch the
+   sun the way the real thing does. */
+function buildDaisy(seedOffset) {
+  var mb = new MeshBuilder();
+  var so = seedOffset * 11.3;
+  var heads = 2;
+
+  for (var i = 0; i < heads; i++) {
+    var ang = (i / heads) * Math.PI * 2 + noise2(so, i) * 1.1;
+    var spread = i === 0 ? 0 : 0.10 + (noise2(so + i, 3.3) * 0.5 + 0.5) * 0.11;
+    var hx = Math.cos(ang) * spread, hz = Math.sin(ang) * spread;
+    var h = 0.28 + (noise2(so + i, 5.7) * 0.5 + 0.5) * 0.22;
+    var tilt = 0.05 + (noise2(so + i, 8.1) * 0.5 + 0.5) * 0.07;
+    var tx = Math.cos(ang + 0.6) * tilt, tz = Math.sin(ang + 0.6) * tilt;
+
+    // Stem: a thin green ribbon up to the head.
+    var sw = 0.011;
+    var s0 = mb.vert(hx - sw, 0, hz, 0, 0, 1, 0.239, 0.415, 0.145, 0);
+    var s1 = mb.vert(hx + sw, 0, hz, 0, 0, 1, 0.239, 0.415, 0.145, 0);
+    var s2 = mb.vert(hx + tx + sw * 0.6, h, hz + tz, 0, 0, 1, 0.352, 0.568, 0.196, 0);
+    var s3 = mb.vert(hx + tx - sw * 0.6, h, hz + tz, 0, 0, 1, 0.352, 0.568, 0.196, 0);
+    mb.quad(s0, s1, s2, s3);
+
+    // Head: a flat fan of white petals around a yellow eye. At the size these
+    // render on screen a fan reads exactly like a modelled flower for a third
+    // of the triangles — and there are thousands of them.
+    var cx = hx + tx, cz = hz + tz;
+    var petals = 6;
+    var pr = 0.055 + (noise2(so + i, 2.4) * 0.5 + 0.5) * 0.024;
+    // Each head leans a little, the way a flower turns — a perfectly flat
+    // ring reads as a paper hexagon when you walk right up to it.
+    var faceAng = ang + noise2(so, i * 7) * 1.4;
+    var faceAmt = (0.28 + (noise2(so + i, 6.6) * 0.5 + 0.5) * 0.34) * pr;
+    var eye = mb.vert(cx, h + 0.007, cz, 0, 1, 0, 0.949, 0.780, 0.196, 0);
+    var ringBase = mb.pos.length / 3;
+    for (var p = 0; p < petals; p++) {
+      var pa = (p / petals) * Math.PI * 2;
+      var droop = noise2(so + p, i) * 0.008;
+      var tiltY = Math.cos(pa - faceAng) * faceAmt;
+      mb.vert(cx + Math.cos(pa) * pr, h + droop + tiltY, cz + Math.sin(pa) * pr,
+              0, 1, 0, 1.0, 1.0, 0.972, 0);
+    }
+    for (var p3 = 0; p3 < petals; p3++) {
+      mb.tri(eye, ringBase + p3, ringBase + ((p3 + 1) % petals));
+    }
+  }
+  var mesh = mb.finish();
+  computeNormals(mesh);
+  return mesh;
+}
+
+/* --- 7e. Boulder --------------------------------------------------------
+   Low-subdivision displaced sphere, sunk into the ground so it reads as
+   outcrop rather than a ball resting on the surface. */
+function buildRock(seedOffset) {
+  var sphere = icosphere(2);
+  var so = seedOffset * 19.87;
+  var mb = new MeshBuilder();
+
+  for (var i = 0; i < sphere.verts.length; i++) {
+    var v = sphere.verts[i];
+    var rough = fbm3(v[0] * 2.6 + so, v[1] * 2.6, v[2] * 2.6 - so, 3);
+    var rad = 1 + rough * 0.42;
+    var x = v[0] * rad * 1.15;
+    var y = v[1] * rad * 0.72 - 0.28;    // squat, and sunk below the origin
+    var z = v[2] * rad * 1.15;
+
+    var m = 0.82 + (rough * 0.5 + 0.5) * 0.34;
+    var r = 0.435 * m, g = 0.400 * m, b = 0.349 * m;
+    // lichen crusts on the upward faces
+    var lich = clamp((v[1] - 0.15) * 1.6, 0, 1) * (fbm3(v[0] * 5, v[1] * 5, v[2] * 5, 2) * 0.5 + 0.5);
+    r = lerp(r, 0.152, lich);
+    g = lerp(g, 0.407, lich);
+    b = lerp(b, 0.325, lich);
+    mb.vert(x, y, z, 0, 0, 0, r, g, b, lich * 0.05);
+  }
+  for (var f = 0; f < sphere.faces.length; f++) {
+    mb.tri(sphere.faces[f][0], sphere.faces[f][1], sphere.faces[f][2]);
+  }
+  var mesh = mb.finish();
+  computeNormals(mesh);
+  return mesh;
+}
+
+/* --- 7f. Ground fern ----------------------------------------------------
+   A rosette of upright arching blades — the mid-scale detail between the tiny
+   grass and the trees, so the ground is never bare. */
+function buildFern(seedOffset) {
+  var mb = new MeshBuilder();
+  var so = seedOffset * 5.19;
+  var fronds = 8;
+  for (var i = 0; i < fronds; i++) {
+    var ang = (i / fronds) * Math.PI * 2 + noise2(so, i) * 0.55;
+    var dx = Math.cos(ang), dz = Math.sin(ang);
+    var px = -dz, pz = dx;
+    var rise = 1.0 + (noise2(so + i, 6.1) * 0.5 + 0.5) * 0.75;
+    var lean = 0.22 + (noise2(so + i, 2.7) * 0.5 + 0.5) * 0.30;
+    var droop = 0.30 + (noise2(so + i, 9.3) * 0.5 + 0.5) * 0.35;
+
+    var base = 0.92 + noise2(so, i * 3) * 0.22;
+    var prevL = -1, prevR = -1;
+    for (var seg = 0; seg <= 4; seg++) {
+      var t = seg / 4;
+      // Blades climb first and only arch over near the tip, so the plant
+      // stands up instead of splaying flat across the ground.
+      var y = rise * t - droop * t * t * t;
+      var dist = lean * t * t;
+      var halfW = (0.055 + Math.sin(t * Math.PI * 0.9) * 0.075) * (1 - t * 0.55);
+      var shade = lerp(0.62, 1.25, t) * base;
+      // blades run from deep green at the stem to fresh yellow-green at the tip
+      var r = lerp(0.121, 0.501, t) * shade;
+      var g = lerp(0.325, 0.717, t) * shade;
+      var b = lerp(0.098, 0.184, t) * shade;
+      var e = 0;
+      var li = mb.vert(dx * dist + px * halfW, y, dz * dist + pz * halfW,
+                       0, 1, 0, r, g, b, e);
+      var ri = mb.vert(dx * dist - px * halfW, y, dz * dist - pz * halfW,
+                       0, 1, 0, r, g, b, e);
+      if (prevL >= 0) mb.quad(prevL, prevR, ri, li);
+      prevL = li; prevR = ri;
+    }
+  }
+  var mesh = mb.finish();
+  computeNormals(mesh);
+  return mesh;
+}
+
+/* --- 7g. Grass tuft -----------------------------------------------------
+   Deliberately tiny: a few crossed blades, scattered in bulk so the ground
+   surface has texture underfoot instead of reading as a painted plane. */
+function buildGrass(seedOffset) {
+  var mb = new MeshBuilder();
+  var so = seedOffset * 3.77;
+  // A wide clump rather than a single tuft: far fewer instances are needed to
+  // cover the meadow, which is what keeps the blade count affordable.
+  var blades = 11;
+  for (var i = 0; i < blades; i++) {
+    var ang = (i / blades) * Math.PI * 2 + noise2(so, i * 2) * 0.9;
+    var dx = Math.cos(ang), dz = Math.sin(ang);
+    var px = -dz, pz = dx;
+    var h = 0.52 + (noise2(so + i, 4.4) * 0.5 + 0.5) * 0.70;
+    var bend = 0.16 + (noise2(so + i, 7.7) * 0.5 + 0.5) * 0.26;
+    var tint = 0.85 + noise2(so, i * 5) * 0.3;
+    // spread the roots across the clump's footprint
+    var rootR = Math.sqrt((i % 4) / 4) * 0.44;
+    var rx = dx * rootR, rz = dz * rootR;
+
+    var prevL = -1, prevR = -1;
+    for (var seg = 0; seg <= 3; seg++) {
+      var t = seg / 3;
+      var y = h * t - h * 0.22 * t * t;
+      var dist = rootR + bend * t * t;
+      var halfW = 0.032 * (1 - t * 0.9);
+      var shade = lerp(0.7, 1.2, t) * tint;
+      // deep green root, bright sunlit tip — the blades the light passes through
+      var r = lerp(0.129, 0.596, t) * shade;
+      var g = lerp(0.317, 0.749, t) * shade;
+      var b = lerp(0.090, 0.164, t) * shade;
+      var li = mb.vert(dx * dist + px * halfW, y, dz * dist + pz * halfW,
+                       0, 1, 0, r, g, b, 0);
+      var ri = mb.vert(dx * dist - px * halfW, y, dz * dist - pz * halfW,
+                       0, 1, 0, r, g, b, 0);
+      if (prevL >= 0) mb.quad(prevL, prevR, ri, li);
+      prevL = li; prevR = ri;
+    }
+  }
+  var mesh = mb.finish();
+  computeNormals(mesh);
+  return mesh;
+}
+
+/* --- 7i. Water surface --------------------------------------------------
+   A flat grid across the basin. It sits at a fixed level and the terrain
+   simply buries it at the shoreline, which is what shapes the water's edge. */
+function buildWater() {
+  var mb = new MeshBuilder();
+  // A radial fan, not a square: the sheet has to stop inside the bank so the
+  // terrain buries its edge. A square one juts out over the meadow.
+  var rings = 16, spokes = 56, rMax = LAKE.r * 1.22;
+  var centre = mb.vert(LAKE.x, WATER_LEVEL, LAKE.z, 0, 1, 0, 0.098, 0.325, 0.376, 0);
+  var ringStart = [];
+  for (var r = 1; r <= rings; r++) {
+    ringStart.push(mb.pos.length / 3);
+    var t = r / rings;
+    var rad = rMax * t;
+    // The last two rings dive below the waterline, so the sheet's rim is
+    // always buried in the bank instead of ending on a visible straight cut.
+    var skirt = t > 0.86 ? -((t - 0.86) / 0.14) * 6.0 : 0;
+    for (var s = 0; s < spokes; s++) {
+      var a = (s / spokes) * Math.PI * 2;
+      mb.vert(LAKE.x + Math.cos(a) * rad, WATER_LEVEL + skirt, LAKE.z + Math.sin(a) * rad,
+              0, 1, 0, 0.098, 0.325, 0.376, 0);
+    }
+  }
+  for (var s2 = 0; s2 < spokes; s2++) {
+    mb.tri(centre, ringStart[0] + s2, ringStart[0] + ((s2 + 1) % spokes));
+  }
+  for (var r2 = 0; r2 < rings - 1; r2++) {
+    for (var s3 = 0; s3 < spokes; s3++) {
+      var nx = (s3 + 1) % spokes;
+      mb.quad(ringStart[r2] + s3, ringStart[r2 + 1] + s3,
+              ringStart[r2 + 1] + nx, ringStart[r2] + nx);
+    }
+  }
+  return mb.finish();
+}
+
+/* --- 7j. Flying rock ----------------------------------------------------
+   The same inverted-spire trick as a floating island, at boulder scale:
+   displaced sphere, flattened on top, tapered to a point underneath. */
+function buildFlyingRock(seedOffset) {
+  var sphere = icosphere(2);
+  var so = seedOffset * 23.7;
+  var mb = new MeshBuilder();
+
+  for (var i = 0; i < sphere.verts.length; i++) {
+    var v = sphere.verts[i];
+    var y = v[1];
+    var rough = fbm3(v[0] * 2.3 + so, v[1] * 2.3 + so, v[2] * 2.3 - so, 4);
+    var radius = 1 + rough * 0.36;
+    var yScale, hSquash;
+    if (y >= 0) {
+      yScale = 0.40 + rough * 0.10;
+      hSquash = 1.0;
+    } else {
+      var d = -y;
+      yScale = 0.40 + d * 1.35;
+      hSquash = Math.max(Math.pow(1 - d, 0.66) * (1 + rough * 0.2), 0.04);
+    }
+    var px = v[0] * radius * hSquash;
+    var py = y * radius * yScale;
+    var pz = v[2] * radius * hSquash;
+
+    // Grass rides the flat top and spills a little over the rim.
+    var moss = smoothstep(clamp((y + 0.16 + rough * 0.26) * 2.6, 0, 1));
+    var m = 0.86 + (rough * 0.5 + 0.5) * 0.28;
+    var shade = lerp(0.80, 1.05, clamp(y * 0.7 + 0.55, 0, 1));
+    var r = 0.408 * m * shade, g = 0.372 * m * shade, b = 0.317 * m * shade;
+    r = lerp(r, 0.278 * m, moss);
+    g = lerp(g, 0.545 * m, moss);
+    b = lerp(b, 0.145 * m, moss);
+    mb.vert(px, py, pz, 0, 0, 0, r, g, b, 0);
+  }
+  for (var f = 0; f < sphere.faces.length; f++) {
+    mb.tri(sphere.faces[f][0], sphere.faces[f][1], sphere.faces[f][2]);
+  }
+  var mesh = mb.finish();
+  computeNormals(mesh);
+  return mesh;
+}
+
+/* --- 7k. Waterfall ------------------------------------------------------
+   A unit-tall crossed pair of sheets. The falling streaks and the fade are
+   done in the shader; the geometry is just the curtain they run down. */
+function buildFall() {
+  var mb = new MeshBuilder();
+  for (var i = 0; i < 2; i++) {
+    var ang = i * Math.PI * 0.5;
+    var dx = Math.cos(ang) * 0.5, dz = Math.sin(ang) * 0.5;
+    // narrower at the lip, spreading as it falls
+    var a = mb.vert(-dx * 0.55, 0, -dz * 0.55, 0, 0, 1, 0.847, 0.933, 0.960, 0);
+    var b = mb.vert(dx * 0.55, 0, dz * 0.55, 0, 0, 1, 0.847, 0.933, 0.960, 0);
+    var c = mb.vert(dx, -1, dz, 0, 0, 1, 1.0, 1.0, 1.0, 0);
+    var d = mb.vert(-dx, -1, -dz, 0, 0, 1, 1.0, 1.0, 1.0, 0);
+    mb.quad(a, b, c, d);
+  }
+  var mesh = mb.finish();
+  computeNormals(mesh);
+  return mesh;
+}
+
+/* --- 7l. Deer -----------------------------------------------------------
+   Low-poly grazer: barrel body, neck and head, four legs that swing from
+   the hip in the vertex shader. Built facing -Z. */
+function buildDeer(seedOffset) {
+  var mb = new MeshBuilder();
+  var so = seedOffset * 4.1;
+  var coat = [0.341, 0.211, 0.121];
+  var pale = [0.505, 0.396, 0.286];
+
+  // A box helper, since every part of the animal is a tapered box.
+  function box(cx, cy, cz, hx, hy, hz, col, taper) {
+    var t = taper === undefined ? 1 : taper;
+    var base = mb.pos.length / 3;
+    var pts = [
+      [-hx, -hy, -hz], [hx, -hy, -hz], [hx, -hy, hz], [-hx, -hy, hz],
+      [-hx * t, hy, -hz * t], [hx * t, hy, -hz * t], [hx * t, hy, hz * t], [-hx * t, hy, hz * t]
+    ];
+    for (var p = 0; p < 8; p++) {
+      var shade = 0.84 + (pts[p][1] > 0 ? 0.14 : 0) + noise2(so + p, cx) * 0.08;
+      mb.vert(cx + pts[p][0], cy + pts[p][1], cz + pts[p][2], 0, 0, 0,
+              col[0] * shade, col[1] * shade, col[2] * shade, 0);
+    }
+    var q = [[0,1,2,3],[4,7,6,5],[0,4,5,1],[1,5,6,2],[2,6,7,3],[3,7,4,0]];
+    for (var f = 0; f < 6; f++) {
+      mb.quad(base + q[f][0], base + q[f][1], base + q[f][2], base + q[f][3]);
+    }
+  }
+
+  box(0, 0.95, 0, 0.26, 0.28, 0.62, coat, 0.9);          // barrel
+  box(0, 1.02, -0.60, 0.15, 0.17, 0.22, coat);           // chest
+  box(0, 1.28, -0.78, 0.10, 0.26, 0.11, coat, 0.85);     // neck
+  box(0, 1.54, -0.88, 0.11, 0.11, 0.20, pale, 0.8);      // head
+  box(0, 0.98, 0.66, 0.08, 0.10, 0.10, pale, 0.7);       // tail
+
+  // Legs — kept below the hip line the shader uses as its pivot.
+  var legs = [[-0.17, -0.42], [0.17, -0.42], [-0.17, 0.44], [0.17, 0.44]];
+  for (var l = 0; l < 4; l++) {
+    box(legs[l][0], 0.36, legs[l][1], 0.055, 0.36, 0.06, coat, 0.75);
+  }
+  // Ears
+  box(-0.16, 1.62, -0.84, 0.06, 0.08, 0.03, pale, 0.6);
+  box(0.16, 1.62, -0.84, 0.06, 0.08, 0.03, pale, 0.6);
+
+  var mesh = mb.finish();
+  computeNormals(mesh);
+  return mesh;
+}
+
+/* --- 7m. Butterfly ------------------------------------------------------
+   Body plus two wings. The wings fold in the vertex shader, so the flap
+   costs nothing on the CPU. */
+function buildButterfly(r, g, b) {
+  var mb = new MeshBuilder();
+  // body: a thin dark sliver
+  var body = mb.pos.length / 3;
+  mb.vert(-0.04, 0, -0.16, 0, 1, 0, 0.121, 0.098, 0.086, 0);
+  mb.vert(0.04, 0, -0.16, 0, 1, 0, 0.121, 0.098, 0.086, 0);
+  mb.vert(0.03, 0, 0.18, 0, 1, 0, 0.156, 0.129, 0.113, 0);
+  mb.vert(-0.03, 0, 0.18, 0, 1, 0, 0.156, 0.129, 0.113, 0);
+  mb.quad(body, body + 1, body + 2, body + 3);
+
+  // wings: mirrored pairs, marked for the shader by their x sign
+  for (var s = -1; s <= 1; s += 2) {
+    var w = mb.pos.length / 3;
+    mb.vert(0.03 * s, 0, -0.14, 0, 1, 0, r, g, b, 0);
+    mb.vert(0.52 * s, 0, -0.30, 0, 1, 0, r * 1.1, g * 1.1, b * 1.1, 0);
+    mb.vert(0.60 * s, 0, 0.10, 0, 1, 0, r, g, b, 0);
+    mb.vert(0.03 * s, 0, 0.16, 0, 1, 0, r * 0.8, g * 0.8, b * 0.8, 0);
+    mb.quad(w, w + 1, w + 2, w + 3);
+    // lower lobe
+    var w2 = mb.pos.length / 3;
+    mb.vert(0.03 * s, 0, 0.10, 0, 1, 0, r * 0.85, g * 0.85, b * 0.85, 0);
+    mb.vert(0.40 * s, 0, 0.14, 0, 1, 0, r * 0.95, g * 0.95, b * 0.95, 0);
+    mb.vert(0.26 * s, 0, 0.40, 0, 1, 0, r * 0.75, g * 0.75, b * 0.75, 0);
+    mb.vert(0.03 * s, 0, 0.30, 0, 1, 0, r * 0.7, g * 0.7, b * 0.7, 0);
+    mb.quad(w2, w2 + 1, w2 + 2, w2 + 3);
+  }
+  var mesh = mb.finish();
+  computeNormals(mesh);
+  return mesh;
+}
+
+/* --- 7h. Pollen mote ----------------------------------------------------
+   Two crossed quads, tiny and self-lit — the seed fluff drifting through
+   the sun shafts. Cheap enough to scatter by the thousand. */
+function buildMote() {
+  var mb = new MeshBuilder();
+  var r = 0.5;
+  for (var i = 0; i < 2; i++) {
+    var ang = i * Math.PI * 0.5;
+    var dx = Math.cos(ang) * r, dz = Math.sin(ang) * r;
+    var a = mb.vert(-dx, -r, -dz, 0, 0, 1, 1.0, 0.976, 0.870, 1.0);
+    var b = mb.vert(dx, -r, dz, 0, 0, 1, 1.0, 0.976, 0.870, 1.0);
+    var c = mb.vert(dx, r, dz, 0, 0, 1, 1.0, 0.988, 0.925, 1.0);
+    var d = mb.vert(-dx, r, -dz, 0, 0, 1, 1.0, 0.988, 0.925, 1.0);
+    mb.quad(a, b, c, d);
+  }
+  var mesh = mb.finish();
+  computeNormals(mesh);
+  return mesh;
+}
+
+/* =========================================================================
+   8. GPU mesh upload
+   ========================================================================= */
+var A_POS = 0, A_NRM = 1, A_COL = 2, A_INST = 3;   // inst uses 3,4,5 (mat-ish rows)
+
+function uploadMesh(mesh, instances) {
+  var vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+
+  var pb = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, pb);
+  gl.bufferData(gl.ARRAY_BUFFER, mesh.pos, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(A_POS);
+  gl.vertexAttribPointer(A_POS, 3, gl.FLOAT, false, 0, 0);
+
+  var nb = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, nb);
+  gl.bufferData(gl.ARRAY_BUFFER, mesh.nrm, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(A_NRM);
+  gl.vertexAttribPointer(A_NRM, 3, gl.FLOAT, false, 0, 0);
+
+  var cb = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, cb);
+  gl.bufferData(gl.ARRAY_BUFFER, mesh.col, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(A_COL);
+  gl.vertexAttribPointer(A_COL, 4, gl.FLOAT, false, 0, 0);
+
+  var instCount = 1, ibuf = null;
+  if (instances) {
+    // Per-instance layout, 8 floats: x, y, z, scaleXZ, scaleY, yaw, phase, tint
+    var ib = gl.createBuffer();
+    ibuf = ib;
+    gl.bindBuffer(gl.ARRAY_BUFFER, ib);
+    gl.bufferData(gl.ARRAY_BUFFER, instances, gl.DYNAMIC_DRAW);
+    var stride = 8 * 4;
+    gl.enableVertexAttribArray(A_INST);
+    gl.vertexAttribPointer(A_INST, 4, gl.FLOAT, false, stride, 0);
+    gl.vertexAttribDivisor(A_INST, 1);
+    gl.enableVertexAttribArray(A_INST + 1);
+    gl.vertexAttribPointer(A_INST + 1, 4, gl.FLOAT, false, stride, 16);
+    gl.vertexAttribDivisor(A_INST + 1, 1);
+    instCount = instances.length / 8;
+  }
+
+  var eb = gl.createBuffer();
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, eb);
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.idx, gl.STATIC_DRAW);
+
+  gl.bindVertexArray(null);
+  return { vao: vao, count: mesh.count, instances: instCount, ibuf: ibuf };
+}
+
+/* Push new per-instance data for things that move under CPU control. */
+function updateInstances(batch, data) {
+  gl.bindBuffer(gl.ARRAY_BUFFER, batch.ibuf);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, data);
+}
+
+/* =========================================================================
+   9. Shaders
+   ========================================================================= */
+var SKY_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aPos;
+out vec2 vNdc;
+void main() {
+  vNdc = aPos;
+  gl_Position = vec4(aPos, 1.0, 1.0);
+}`;
+
+var SKY_FS = `#version 300 es
+precision highp float;
+in vec2 vNdc;
+out vec4 outColor;
+
+uniform mat4 uInvVP;
+uniform vec3 uCamPos;
+uniform vec3 uSunDir;
+uniform vec3 uSkyTop, uSkyMid, uSkyHorizon, uSunColor;
+uniform float uNight;     // 0 day .. 1 night
+uniform float uTime;
+
+// Hash for the starfield: one seed per cell of a direction-space lattice.
+float sh3(vec3 p) {
+  return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+}
+
+// cheap hash-based star / cloud noise
+float h(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h(i), h(i + vec2(1,0)), f.x),
+             mix(h(i + vec2(0,1)), h(i + vec2(1,1)), f.x), f.y);
+}
+float fbm(vec2 p) {
+  float s = 0.0, a = 0.5;
+  for (int i = 0; i < 5; i++) { s += vnoise(p) * a; p *= 2.05; a *= 0.5; }
+  return s;
+}
+
+void main() {
+  vec4 far = uInvVP * vec4(vNdc, 1.0, 1.0);
+  vec3 dir = normalize(far.xyz / far.w - uCamPos);
+
+  float up = clamp(dir.y, -1.0, 1.0);
+  float t = clamp(up * 0.5 + 0.5, 0.0, 1.0);
+
+  vec3 col = mix(uSkyHorizon, uSkyMid, smoothstep(0.50, 0.74, t));
+  col = mix(col, uSkyTop, smoothstep(0.68, 1.0, t));
+  // Pale sun-washed haze sitting on the horizon, warmed toward the sun.
+  float hz = pow(1.0 - abs(up), 9.0);
+  float sd = max(dot(dir, uSunDir), 0.0);
+  col = mix(col, vec3(0.949, 0.949, 0.925), hz * 0.62);
+  col = mix(col, vec3(1.0, 0.949, 0.831), hz * pow(sd, 1.6) * 0.72);
+
+  // Low afternoon sun: tight disc, wide warm bloom around it.
+  col += uSunColor * pow(sd, 900.0) * 2.2;
+  col += uSunColor * pow(sd, 26.0) * 0.55;
+  col += vec3(1.0, 0.925, 0.780) * pow(sd, 4.0) * 0.30;
+  col += vec3(1.0, 0.949, 0.850) * pow(sd, 1.4) * 0.10;
+
+  // Soft fair-weather cloud, thicker near the horizon.
+  if (up > 0.01) {
+    vec2 cp = dir.xz / max(dir.y, 0.045);
+    float c = fbm(cp * 0.42 + vec2(uTime * 0.005, uTime * 0.0034));
+    c = smoothstep(0.46, 0.80, c) * smoothstep(0.0, 0.30, up);
+    // clouds pick up the sun on the side facing it
+    vec3 cloud = mix(vec3(0.949, 0.960, 0.972), vec3(1.0, 0.960, 0.878),
+                     pow(sd, 2.0));
+    col = mix(col, cloud, c * 0.58 * (1.0 - uNight * 0.55));
+  }
+
+  // ---- night ------------------------------------------------------------
+  if (uNight > 0.001) {
+    // Deep blue overhead falling to a faint glow at the horizon.
+    vec3 night = mix(vec3(0.031, 0.058, 0.121), vec3(0.008, 0.012, 0.043),
+                     smoothstep(0.45, 1.0, t));
+    night = mix(vec3(0.086, 0.105, 0.176), night, smoothstep(0.42, 0.68, t));
+
+    // Stars: quantise the view ray into cells and light the few that win.
+    vec3 sp = dir * 130.0;
+    vec3 cell = floor(sp);
+    float rnd = sh3(cell);
+    if (rnd > 0.9860) {
+      vec3 centre = cell + vec3(sh3(cell + 1.7), sh3(cell + 4.3), sh3(cell + 9.1));
+      float d = length(sp - centre);
+      float mag = (rnd - 0.9860) / 0.0140;
+      float twinkle = 0.72 + 0.28 * sin(uTime * (1.5 + mag * 4.0) + rnd * 90.0);
+      // faint colour: most stars white, a few warm or blue
+      vec3 sc = mix(vec3(0.85, 0.90, 1.0), vec3(1.0, 0.92, 0.80), sh3(cell + 21.0));
+      night += sc * smoothstep(0.42, 0.0, d) * (0.35 + mag * 1.5) * twinkle
+               * smoothstep(-0.08, 0.10, dir.y);
+    }
+
+    // A band of denser haze-stars, standing in for the Milky Way.
+    float band = exp(-pow((dot(dir, normalize(vec3(0.62, 0.42, -0.66)))) * 3.1, 2.0));
+    night += vec3(0.14, 0.16, 0.23) * band * 0.42 * smoothstep(-0.02, 0.2, dir.y);
+
+    // The moon, opposite the sun's side of the sky, with a soft halo.
+    vec3 mDir = normalize(vec3(-0.42, 0.44, 0.79));
+    float md = dot(dir, mDir);
+    float disc = smoothstep(0.9975, 0.9984, md);
+    float crater = sh3(floor(dir * 260.0));
+    vec3 moon = mix(vec3(0.878, 0.898, 0.925), vec3(0.741, 0.769, 0.815), crater);
+    night = mix(night, moon, disc);
+    night += vec3(0.30, 0.35, 0.45) * pow(max(md, 0.0), 900.0) * 0.5;
+    night += vec3(0.16, 0.20, 0.30) * pow(max(md, 0.0), 60.0) * 0.28;
+
+    col = mix(col, night, uNight);
+  }
+
+  outColor = vec4(col, 1.0);
+}`;
+
+var WORLD_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNrm;
+layout(location=2) in vec4 aCol;      // rgb + emissive
+layout(location=3) in vec4 aInstA;    // x, y, z, scaleXZ
+layout(location=4) in vec4 aInstB;    // scaleY, yaw, phase, tint
+
+uniform mat4 uVP;
+uniform float uTime;
+uniform int uInstanced;   // 0 = single mesh at origin
+// 0 none · 1 foliage sway · 2 pollen drift · 3 deer stride · 4 wingbeat
+// · 5 hovering rock · 6 water surface
+uniform int uSway;
+
+out vec3 vWorld;
+out vec3 vNrm;
+out vec4 vCol;
+out float vLocalY;        // height within the mesh, for the waterfall streaks
+
+void main() {
+  vec3 p = aPos;
+  vec3 n = aNrm;
+  vec3 origin = vec3(0.0);
+  float tint = 1.0;
+  vLocalY = aPos.y;
+
+  if (uInstanced == 1) {
+    float sxz = aInstA.w, sy = aInstB.x, yaw = aInstB.y, phase = aInstB.z;
+    tint = aInstB.w;
+
+    // Deformations that must happen in the animal's own frame, before it is
+    // scaled and turned to face its heading.
+    if (uSway == 3) {
+      // Legs swing from the hip; front and back pairs are half a cycle apart.
+      float legT = max(0.62 - aPos.y, 0.0);
+      float ph = phase + (aPos.z > 0.0 ? 3.14159 : 0.0);
+      p.z += sin(ph) * legT * 0.75;
+      p.y += max(sin(ph * 2.0), 0.0) * legT * 0.10;
+      // the whole body rocks a little as it walks
+      p.y += sin(phase * 2.0) * 0.035;
+    } else if (uSway == 4) {
+      // Wings fold up and down about the body's long axis.
+      float flap = sin(uTime * 11.0 + phase) * 0.85;
+      float side = abs(aPos.x);
+      p.y += side * flap;
+      p.x -= aPos.x * side * (1.0 - cos(flap)) * 0.6;
+    }
+
+    p *= vec3(sxz, sy, sxz);
+    n *= vec3(sy, sxz, sy);           // inverse-scale for correct normals
+
+    float c = cos(yaw), s = sin(yaw);
+    p = vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z);
+    n = vec3(c * n.x + s * n.z, n.y, -s * n.x + c * n.z);
+
+    origin = aInstA.xyz;
+
+    if (uSway == 1) {
+      // trees / plants: displacement grows with local height
+      float h = max(aPos.y, 0.0);
+      float w = sin(uTime * 0.9 + phase) * 0.5 + sin(uTime * 1.7 + phase * 2.3) * 0.22;
+      p.x += w * h * h * 0.012 * sy;
+      p.z += cos(uTime * 0.75 + phase * 1.4) * h * h * 0.010 * sy;
+    } else if (uSway == 2) {
+      // pollen: a slow lazy drift on all three axes, each mote out of phase
+      origin.x += sin(uTime * 0.21 + phase) * 1.5 + sin(uTime * 0.07 + phase * 2.7) * 2.4;
+      origin.y += sin(uTime * 0.16 + phase * 1.6) * 0.7;
+      origin.z += cos(uTime * 0.18 + phase * 1.3) * 1.5 + cos(uTime * 0.06 + phase) * 2.1;
+    } else if (uSway == 4) {
+      // butterflies wander a loop and bob as they beat
+      origin.x += sin(uTime * 0.34 + phase) * 2.6 + sin(uTime * 0.11 + phase * 3.1) * 1.4;
+      origin.y += sin(uTime * 0.9 + phase * 1.7) * 0.32;
+      origin.z += cos(uTime * 0.29 + phase * 1.2) * 2.6 + cos(uTime * 0.13 + phase) * 1.6;
+    } else if (uSway == 5) {
+      // hovering rocks: a slow vertical bob and a lazy turn
+      origin.y += sin(uTime * 0.19 + phase) * 0.9;
+      float dy = uTime * 0.021 + phase * 0.1;
+      float cd = cos(dy), sd = sin(dy);
+      p = vec3(cd * p.x + sd * p.z, p.y, -sd * p.x + cd * p.z);
+      n = vec3(cd * n.x + sd * n.z, n.y, -sd * n.x + cd * n.z);
+    }
+  }
+
+  // Ripples on the lake: two crossing wave trains, applied to the flat grid.
+  if (uSway == 6) {
+    float w1 = sin(p.x * 0.42 + uTime * 1.15) * cos(p.z * 0.37 - uTime * 0.85);
+    float w2 = sin((p.x + p.z) * 0.19 - uTime * 0.55);
+    p.y += w1 * 0.055 + w2 * 0.075;
+    n = normalize(vec3(
+      -(cos(p.x * 0.42 + uTime * 1.15) * 0.42 * 0.055 + cos((p.x + p.z) * 0.19 - uTime * 0.55) * 0.19 * 0.075),
+      1.0,
+      -(cos((p.x + p.z) * 0.19 - uTime * 0.55) * 0.19 * 0.075)));
+  }
+
+  vWorld = origin + p;
+  vNrm = normalize(n);
+  vCol = vec4(aCol.rgb * tint, aCol.a);
+  gl_Position = uVP * vec4(vWorld, 1.0);
+}`;
+
+var WORLD_FS = `#version 300 es
+precision highp float;
+in vec3 vWorld;
+in vec3 vNrm;
+in vec4 vCol;
+in float vLocalY;
+out vec4 outColor;
+
+uniform vec3 uCamPos;
+uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+uniform vec3 uFogColor;
+uniform vec3 uSkyTop;
+uniform float uFogDensity;
+uniform float uFoliage;   // 1 for leaves and grass: light passes through them
+uniform float uGround;    // 1 for the terrain surface: gets a grass texture
+uniform float uWater;     // 1 for the lake surface
+uniform float uFall;      // 1 for falling water
+uniform float uNight;     // 0 day .. 1 night
+uniform float uTime;
+
+// Cheap value noise, for the canopy dapple.
+float dh(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float dn(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(dh(i), dh(i + vec2(1,0)), f.x),
+             mix(dh(i + vec2(0,1)), dh(i + vec2(1,1)), f.x), f.y);
+}
+
+void main() {
+  vec3 n = normalize(vNrm);
+  vec3 viewVec = uCamPos - vWorld;
+  float dist = length(viewVec);
+  vec3 v = viewVec / max(dist, 0.0001);
+
+  // Two-sided shading: leaves and blades are single-sided geometry.
+  if (dot(n, v) < 0.0) n = -n;
+
+  // Dappled canopy shade — broad blotches of shadow with bright gaps punched
+  // through them, drifting very slowly as if the leaves were moving. This is
+  // what makes the light read as filtered through trees rather than open sky.
+  vec2 dp = vWorld.xz * 0.085 + vec2(uTime * 0.012, uTime * 0.009);
+  float dap = dn(dp) * 0.55 + dn(dp * 2.3 + 5.1) * 0.30 + dn(dp * 5.7) * 0.15;
+  dap = smoothstep(0.30, 0.72, dap);
+  float shadeAmt = mix(0.26, 1.20, dap);
+
+  // Night softens the dapple away — moonlight has no leaf shadows to speak of.
+  shadeAmt = mix(shadeAmt, 0.86, uNight);
+
+  // Key light: the sun by day, a cold weak moon by night.
+  vec3 keyCol = mix(uSunColor, vec3(0.451, 0.545, 0.760), uNight);
+  float keyStrength = mix(1.55, 0.30, uNight);
+  float ndl = dot(n, uSunDir);
+  float key = clamp((ndl + 0.26) / 1.26, 0.0, 1.0);
+  vec3 light = keyCol * key * keyStrength * shadeAmt;
+
+  // Sky ambient from above, warm green bounce off the lawn from below.
+  float upAmt = n.y * 0.5 + 0.5;
+  vec3 bounce = mix(vec3(0.164, 0.243, 0.094), vec3(0.043, 0.062, 0.098), uNight);
+  vec3 skyAmb = mix(uSkyTop * 1.05, vec3(0.035, 0.051, 0.098), uNight);
+  light += mix(bounce, skyAmb, upAmt) * mix(0.66, 0.52, uNight);
+  // A small uniform fill, so backlit undersides read as dark rock and leaf
+  // rather than as black cut-outs against the sky.
+  light += mix(vec3(0.113, 0.129, 0.145), vec3(0.020, 0.027, 0.043), uNight);
+
+  // Translucency: the low sun shining THROUGH leaves and grass blades, which
+  // is what gives the reference its glow. Strongest looking into the sun, on
+  // the faces turned away from it.
+  float back = pow(max(dot(-v, uSunDir), 0.0), 2.6);
+  float thin = clamp(0.5 - ndl * 0.5, 0.0, 1.0);
+  light += uSunColor * vec3(1.0, 1.06, 0.62) * back * thin * uFoliage * 2.4
+           * shadeAmt * (1.0 - uNight);
+
+  // Warm rim along edges facing the light.
+  float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0);
+  light += mix(vec3(1.0, 0.949, 0.780), vec3(0.51, 0.62, 0.85), uNight)
+           * rim * clamp(back + 0.25, 0.0, 1.0) * mix(0.42, 0.30, uNight);
+
+  vec3 albedo = vCol.rgb;
+
+  // The lawn is not flat paint: break its surface with fine, stretched noise
+  // so it reads as grass right up to the camera, where the scattered tufts
+  // are too sparse to cover it on their own.
+  if (uGround > 0.5) {
+    vec2 gp = vWorld.xz;
+    // The finest octave is dropped with distance — at range it is smaller than
+    // a pixel and only shimmers.
+    float detailFade = 1.0 - smoothstep(28.0, 95.0, dist);
+    float blade = dn(gp * 5.5) * 0.5 + dn(gp * 13.0 + 3.7) * 0.32
+                + dn(gp * 31.0) * 0.18 * detailFade;
+    float clump = dn(gp * 0.75 + 11.3);
+    albedo *= 1.0 + (blade - 0.5) * 0.78 * mix(0.5, 1.0, detailFade);
+    // patches of deeper growth, the way real turf is never one tone
+    albedo = mix(albedo, albedo * vec3(0.72, 0.86, 0.62), smoothstep(0.55, 0.9, clump) * 0.6);
+  }
+
+  vec3 col = albedo * light;
+  float alpha = 1.0;
+
+  // --- the lake surface -------------------------------------------------
+  if (uWater > 0.5) {
+    // Grazing angles reflect the sky; looking straight down you see through
+    // to the bed. That split is what makes a plane read as water.
+    float fres = pow(1.0 - max(dot(n, v), 0.0), 3.4);
+    vec3 deepCol = mix(vec3(0.043, 0.176, 0.196), vec3(0.016, 0.039, 0.070), uNight);
+    vec3 skyRefl = mix(uSkyTop * 1.5 + vec3(0.15, 0.18, 0.20), vec3(0.062, 0.086, 0.152), uNight);
+    col = mix(deepCol, skyRefl, clamp(fres * 1.25, 0.0, 1.0));
+    // sun glitter on the ripples
+    vec3 hv = normalize(uSunDir + v);
+    float spec = pow(max(dot(n, hv), 0.0), 220.0);
+    col += mix(uSunColor, vec3(0.72, 0.80, 1.0), uNight) * spec * mix(1.5, 0.9, uNight);
+    col += keyCol * pow(max(dot(n, hv), 0.0), 18.0) * 0.16;
+    alpha = mix(0.90, 0.62, clamp(fres, 0.0, 1.0));
+  }
+
+  // --- falling water ----------------------------------------------------
+  if (uFall > 0.5) {
+    // Streaks race down the curtain; the sheet thins and breaks up as it goes.
+    float fall = vLocalY;                      // 0 at the lip, -1 at the base
+    float streak = dn(vec2(vWorld.x * 2.6 + vWorld.z * 2.1, fall * 26.0 + uTime * 9.0));
+    float streak2 = dn(vec2(vWorld.x * 5.1 - vWorld.z * 3.3, fall * 61.0 + uTime * 15.0));
+    float foam = streak * 0.6 + streak2 * 0.4;
+    col = mix(vec3(0.647, 0.800, 0.847), vec3(1.0, 1.0, 1.0), foam);
+    col *= mix(0.55, 1.35, clamp(shadeAmt, 0.0, 1.0)) * mix(1.0, 0.42, uNight);
+    col += keyCol * 0.35 * (1.0 - uNight);
+    // fade in below the lip and thin out toward the pool
+    alpha = smoothstep(0.0, -0.06, fall) * mix(0.82, 0.42, -fall) * (0.55 + foam * 0.65);
+    alpha = clamp(alpha, 0.0, 0.92);
+  }
+
+  // Self-lit specks (the drifting pollen); nothing else uses this channel.
+  col += vCol.rgb * vCol.a * mix(2.4, 3.4, uNight);
+
+  // Bright afternoon haze — thin close by, milky in the distance.
+  float fog = 1.0 - exp(-pow(dist * uFogDensity, 2.0));
+  fog = clamp(fog, 0.0, 1.0);
+
+  // The haze glows where you look toward the sun.
+  vec3 fogCol = mix(uFogColor, vec3(1.0, 0.972, 0.878),
+                    pow(max(dot(-v, uSunDir), 0.0), 3.0) * 0.85);
+  fogCol = mix(fogCol, vec3(0.055, 0.086, 0.152), uNight);
+  col = mix(col, fogCol, fog);
+
+  // Highlight rolloff, then a contrast curve that keeps the greens saturated
+  // instead of washing them toward pastel.
+  col = col / (col + vec3(1.55));
+  col = pow(col * 1.92, vec3(1.06));
+  col = mix(vec3(dot(col, vec3(0.299, 0.587, 0.114))), col, mix(1.22, 0.72, uNight));
+
+  outColor = vec4(col, alpha);
+}`;
+
+/* =========================================================================
+   9b. Link portals — the five glowing panels you can open
+   ========================================================================= */
+var PORTALS = [
+  { label: "EggGame",             url: "https://egggame.expo.app/roost" },
+  { label: "LINKEDIN",          url: "https://www.linkedin.com/in/liad-ben-moshe-3b9a95188/" },
+  { label: "GITHUB",            url: "https://github.com/LiadBenMoshe" },
+  { label: "ECONOMICS STUDIES", url: "https://lbm-study.com/" },
+  { label: "PROFIT CALCULATOR", url: "https://square-math-bd83.liadbenmoshe10.workers.dev/" }
+];
+
+var CELL_W = 512, CELL_H = 256;
+
+/* Rasterise the labels once, into a single column of cells. No webfont is
+   involved — the glyphs are baked at load from whatever the system provides,
+   which keeps the page as self-contained as the rest of the world. */
+function bakeLabels() {
+  var cv = document.createElement("canvas");
+  cv.width = CELL_W;
+  cv.height = CELL_H * PORTALS.length;
+  var g = cv.getContext("2d");
+  g.clearRect(0, 0, cv.width, cv.height);
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+
+  var font = '600 %spx "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif';
+  var maxW = CELL_W * 0.86;
+
+  PORTALS.forEach(function (p, i) {
+    var cy = i * CELL_H + CELL_H / 2;
+
+    // Long labels break to two lines; everything then shrinks until it fits.
+    var words = p.label.split(" ");
+    var lines = words.length > 1 ? [words[0], words.slice(1).join(" ")] : [p.label];
+    var size = lines.length > 1 ? 92 : 128;
+    for (var guard = 0; guard < 40; guard++) {
+      g.font = font.replace("%s", size);
+      var widest = 0;
+      lines.forEach(function (ln) { widest = Math.max(widest, g.measureText(ln).width); });
+      if (widest <= maxW || size <= 24) break;
+      size -= 4;
+    }
+    g.font = font.replace("%s", size);
+
+    var step = size * 1.12;
+    var top = cy - (lines.length - 1) * step / 2;
+    lines.forEach(function (ln, k) {
+      var y = top + k * step;
+      // A soft dark halo first, so the text still reads where the panel behind
+      // it is at its brightest.
+      g.shadowColor = "rgba(4, 20, 26, 0.85)";
+      g.shadowBlur = 22;
+      g.fillStyle = "rgba(255, 255, 255, 0.97)";
+      g.fillText(ln, CELL_W / 2, y);
+      g.shadowBlur = 0;
+      g.fillText(ln, CELL_W / 2, y);
+    });
+  });
+
+  var tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  // No Y flip: the atlas is addressed top-down, so row i of the canvas is row
+  // i of the labels. Flipping here would silently reverse label order against
+  // the URL list — the panels would each carry someone else's link.
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, cv);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  return tex;
+}
+
+var PORTAL_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 aCorner;   // -1..1 across the panel
+layout(location=1) in vec4 aInstA;    // x, y, z, halfWidth
+layout(location=2) in vec4 aInstB;    // halfHeight, row, phase, unused
+
+uniform mat4 uVP;
+uniform vec3 uCamPos;
+uniform float uTime;
+
+out vec2 vCorner;
+out float vRow;
+out vec3 vWorld;
+
+void main() {
+  float hw = aInstA.w, hh = aInstB.x, row = aInstB.y, phase = aInstB.z;
+
+  vec3 centre = aInstA.xyz;
+  // Bob and drift, in the idiom the hovering rocks already use.
+  centre.y += sin(uTime * 0.55 + phase) * 0.22;
+  centre.x += sin(uTime * 0.23 + phase * 1.7) * 0.16;
+  centre.z += cos(uTime * 0.19 + phase) * 0.16;
+
+  // Billboard about Y only: the panel turns to face you but stays upright, so
+  // it is readable — and aimable — from wherever you walk up to it.
+  vec3 toCam = uCamPos - centre;
+  vec3 right = normalize(vec3(toCam.z, 0.0, -toCam.x));
+
+  vec3 world = centre + right * (aCorner.x * hw) + vec3(0.0, aCorner.y * hh, 0.0);
+
+  vCorner = aCorner;
+  vRow = row;
+  vWorld = world;
+  gl_Position = uVP * vec4(world, 1.0);
+}`;
+
+var PORTAL_FS = `#version 300 es
+precision highp float;
+in vec2 vCorner;
+in float vRow;
+in vec3 vWorld;
+out vec4 outColor;
+
+uniform sampler2D uLabels;
+uniform int uCount;
+uniform vec3 uCamPos;
+uniform vec3 uFogColor;
+uniform float uFogDensity;
+uniform float uNight;
+uniform float uTime;
+uniform float uAimed;     // row index of the aimed portal, or -1
+
+/* Distance to a rounded rectangle, in the quad's own -1..1 space. */
+float roundRect(vec2 p, vec2 ext, float r) {
+  vec2 q = abs(p) - ext + r;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+
+void main() {
+  bool aimed = abs(vRow - uAimed) < 0.5;
+
+  // The panel occupies the middle of the quad; the rest is room for the glow.
+  vec2 ext = vec2(0.72, 0.52);
+  float d = roundRect(vCorner, ext, 0.22);
+
+  float pulse = 0.86 + 0.14 * sin(uTime * 1.7 + vRow * 1.9);
+  if (aimed) pulse += 0.32;
+
+  // Body, edge and halo.
+  float body = smoothstep(0.02, -0.05, d);
+  float edge = smoothstep(0.055, 0.0, abs(d)) ;
+  float halo = exp(-max(d, 0.0) * 5.2);
+
+  vec3 tint = mix(vec3(0.42, 0.86, 0.96), vec3(0.62, 0.95, 0.86), 0.5 + 0.5 * sin(vRow * 2.1));
+  if (aimed) tint = mix(tint, vec3(1.0, 0.88, 0.48), 0.85);
+
+  // Aiming darkens the fill and lights the rim, so the label reads better
+  // rather than being swallowed by its own glow.
+  vec3 col = tint * body * (aimed ? 0.26 : 0.42) * pulse;
+  col += tint * edge * (aimed ? 2.10 : 1.35) * pulse;
+  col += tint * halo * (aimed ? 0.62 : 0.30) * pulse;
+  float alpha = clamp(body * 0.50 + edge * 0.85 + halo * 0.26, 0.0, 1.0);
+
+  // The label, mapped to the inner panel only.
+  vec2 lp = vCorner / (ext * 1.02);
+  if (abs(lp.x) < 1.0 && abs(lp.y) < 1.0) {
+    // The atlas runs top-down, so the top of the panel (lp.y = +1) has to map
+    // to the top of this label's cell.
+    float ty = (1.0 - lp.y) * 0.5;
+    vec2 uv = vec2(lp.x * 0.5 + 0.5, (vRow + ty) / float(uCount));
+    vec4 tx = texture(uLabels, uv);
+    vec3 ink = aimed ? vec3(1.0) : vec3(0.94, 0.99, 1.0);
+    col = mix(col, ink * (1.25 + (aimed ? 0.35 : 0.0)), tx.a);
+    alpha = max(alpha, tx.a);
+  }
+
+  // Portals are light sources, so they hold up at night rather than fading.
+  col *= mix(1.0, 1.45, uNight);
+
+  // Match the world's haze so a distant portal sits in the same air.
+  float dist = length(uCamPos - vWorld);
+  float fog = clamp(1.0 - exp(-pow(dist * uFogDensity, 2.0)), 0.0, 1.0);
+  col = mix(col, mix(uFogColor, vec3(0.055, 0.086, 0.152), uNight), fog * 0.7);
+
+  col = col / (col + vec3(1.35));
+  col = pow(col * 1.85, vec3(0.98));
+
+  outColor = vec4(col, alpha);
+}`;
+
+var skyProg = makeProgram(SKY_VS, SKY_FS, "sky");
+var worldProg = makeProgram(WORLD_VS, WORLD_FS, "world");
+var portalProg = makeProgram(PORTAL_VS, PORTAL_FS, "portal");
+var labelTex = bakeLabels();
+
+/* Fullscreen triangle for the sky. */
+var skyVAO = (function () {
+  var vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  var b = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, b);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+  return vao;
+})();
+
+/* =========================================================================
+   10. Populate the world
+   ========================================================================= */
+var gpuTerrain = uploadMesh(terrainMesh, null);
+
+/* --- ground scatter helper --- */
+function scatter(count, opts) {
+  var out = [];
+  var tries = 0, maxTries = count * 24;
+  while (out.length < count && tries++ < maxTries) {
+    var x = (rand() * 2 - 1) * (WORLD.half - 20);
+    var z = (rand() * 2 - 1) * (WORLD.half - 20);
+    var d = Math.hypot(x, z);
+    if (d < opts.minDist || d > opts.maxDist) continue;
+    if (slopeAt(x, z) > opts.maxSlope) continue;
+    var y = heightAt(x, z);
+    if (y < opts.minY) continue;
+    // Nothing grows in the lake, and nothing right at the waterline either.
+    if (y < WATER_LEVEL + 0.35) continue;
+    out.push({
+      x: x, y: y + (opts.sink || 0), z: z,
+      s: opts.scale[0] + rand() * (opts.scale[1] - opts.scale[0]),
+      yaw: rand() * Math.PI * 2,
+      phase: rand() * Math.PI * 2,
+      tint: opts.tint[0] + rand() * (opts.tint[1] - opts.tint[0])
+    });
+  }
+  return out;
+}
+
+function instanceBuffer(list, syRatio) {
+  var data = new Float32Array(list.length * 8);
+  list.forEach(function (d, i) {
+    var o = i * 8;
+    data[o] = d.x; data[o + 1] = d.y; data[o + 2] = d.z; data[o + 3] = d.s;
+    data[o + 4] = d.s * (syRatio || 1); data[o + 5] = d.yaw;
+    data[o + 6] = d.phase; data[o + 7] = d.tint;
+  });
+  return data;
+}
+
+/* Trees — three variants, thickening toward the edges into a tree line that
+   closes the park the way the reference's background does. */
+var treeBatches = [buildTree(5), buildTree(17), buildTree(31)].map(function (mesh, i) {
+  var list = scatter(i === 2 ? 150 : 90, {
+    // the third variant is the far tree line; the first two shade the lawn
+    minDist: i === 2 ? 150 : 30,
+    maxDist: i === 2 ? WORLD.half - 18 : 210,
+    maxSlope: 0.55, minY: -900,
+    scale: [0.85, 1.7], tint: [0.85, 1.2]
+  });
+  return uploadMesh(mesh, instanceBuffer(list, 1.0 + i * 0.1));
+});
+
+/* Leafy weeds — the coarse clumps standing above the mown height. */
+var fernBatches = [buildFern(2), buildFern(9)].map(function (mesh) {
+  var list = scatter(1600, {
+    minDist: 5, maxDist: WORLD.half - 26,
+    maxSlope: 0.75, minY: -900,
+    scale: [0.6, 1.6], tint: [0.75, 1.25], sink: -0.05
+  });
+  return uploadMesh(mesh, instanceBuffer(list, 1.0));
+});
+
+/* Grass — the dense bottom layer that gives the ground texture underfoot. */
+var grassBatches = [buildGrass(6), buildGrass(21)].map(function (mesh) {
+  var list = scatter(6500, {
+    minDist: 3, maxDist: WORLD.half - 22,
+    maxSlope: 1.0, minY: -900,
+    scale: [0.8, 2.3], tint: [0.7, 1.3], sink: -0.04
+  });
+  return uploadMesh(mesh, instanceBuffer(list, 1.0));
+});
+
+/* Boulders — a few half-buried stones, sparse enough to stay a park. */
+var rockBatches = [buildRock(4), buildRock(13)].map(function (mesh) {
+  var list = scatter(70, {
+    minDist: 16, maxDist: WORLD.half - 20,
+    maxSlope: 1.4, minY: -900,
+    scale: [0.8, 2.6], tint: [0.8, 1.15], sink: 0.1
+  });
+  return uploadMesh(mesh, instanceBuffer(list, 0.85));
+});
+
+/* Daisies — the white speckle running through the whole meadow. */
+var daisyBatches = [buildDaisy(3), buildDaisy(19)].map(function (mesh) {
+  var list = scatter(13000, {
+    minDist: 2, maxDist: WORLD.half - 24,
+    maxSlope: 0.8, minY: -900,
+    scale: [1.0, 2.1], tint: [0.9, 1.1], sink: -0.02
+  });
+  return uploadMesh(mesh, instanceBuffer(list, 1.0));
+});
+
+/* Pollen — seed fluff drifting through the low sun. */
+var moteBatch = (function () {
+  var list = [];
+  for (var i = 0; i < 900; i++) {
+    var x = (rand() * 2 - 1) * 150;
+    var z = (rand() * 2 - 1) * 150;
+    list.push({
+      x: x, y: heightAt(x, z) + 0.4 + rand() * rand() * 5.5, z: z,
+      s: 0.020 + rand() * 0.038,
+      yaw: rand() * Math.PI * 2,
+      phase: rand() * Math.PI * 2,
+      tint: 0.6 + rand() * 0.4
+    });
+  }
+  return uploadMesh(buildMote(), instanceBuffer(list, 1.0));
+})();
+
+/* The lake surface — one mesh, no instancing. */
+var waterBatch = uploadMesh(buildWater(), null);
+
+/* --- the link portals ---------------------------------------------------
+   A shallow arc in front of the spawn point, hovering above the grass, so
+   all five are in view the moment you enter and each is a few steps away. */
+var portalVAO = null;
+(function placePortals() {
+  var arc = 1.24;                       // radians the fan spans, inside the FOV
+  PORTALS.forEach(function (p, i) {
+    var t = PORTALS.length === 1 ? 0.5 : i / (PORTALS.length - 1);
+    var a = -arc / 2 + t * arc;
+    var dist = 19 + Math.abs(t - 0.5) * 4;   // the outer ones sit further back
+    // Spawn faces -Z, so the fan opens along -Z.
+    p.x = Math.sin(a) * dist;
+    p.z = -Math.cos(a) * dist;
+    p.y = heightAt(p.x, p.z) + 2.6 + (i % 2) * 1.15;   // stagger so they do not crowd
+    p.hw = 1.95;
+    p.hh = 1.15;
+    p.phase = i * 1.7;
+  });
+
+  // The quad reaches past the panel to give the halo somewhere to fall. In the
+  // fragment shader the panel edge sits at |corner| = 0.72 / 0.52, so the extra
+  // reach out to 1.35 / 1.25 is pure glow.
+  var corners = new Float32Array([
+    -1.35, -1.25,  1.35, -1.25,  1.35, 1.25,
+    -1.35, -1.25,  1.35, 1.25,  -1.35, 1.25
+  ]);
+  var inst = new Float32Array(PORTALS.length * 8);
+  PORTALS.forEach(function (p, i) {
+    var o = i * 8;
+    inst[o] = p.x; inst[o + 1] = p.y; inst[o + 2] = p.z;
+    inst[o + 3] = p.hw / 0.72;          // scale so |corner| 0.72 lands on hw
+    inst[o + 4] = p.hh / 0.52;
+    inst[o + 5] = i;                    // which label row to sample
+    inst[o + 6] = p.phase;
+    inst[o + 7] = 0;
+  });
+
+  portalVAO = gl.createVertexArray();
+  gl.bindVertexArray(portalVAO);
+
+  var cb = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, cb);
+  gl.bufferData(gl.ARRAY_BUFFER, corners, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  var ib = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, ib);
+  gl.bufferData(gl.ARRAY_BUFFER, inst, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(1);
+  gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 32, 0);
+  gl.vertexAttribDivisor(1, 1);
+  gl.enableVertexAttribArray(2);
+  gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 32, 16);
+  gl.vertexAttribDivisor(2, 1);
+
+  gl.bindVertexArray(null);
+})();
+
+/* --- flying rocks, and the falls that pour off them ---------------------
+   Three hang over the lake so their water lands in it; the rest drift over
+   the meadow. Each carries a grassy cap. */
+var rockDefs = [];
+(function placeFlyingRocks() {
+  // The three that feed the lake, spread across it.
+  var feeders = [
+    { x: LAKE.x - 16, z: LAKE.z - 12, s: 11.5, y: 40 },
+    { x: LAKE.x + 21, z: LAKE.z + 9, s: 8.0, y: 31 },
+    { x: LAKE.x + 3, z: LAKE.z - 30, s: 6.2, y: 51 }
+  ];
+  feeders.forEach(function (f, i) {
+    rockDefs.push({
+      x: f.x, y: f.y, z: f.z, s: f.s,
+      sy: 0.9 + rand() * 0.3,
+      yaw: rand() * Math.PI * 2,
+      phase: rand() * Math.PI * 2,
+      tint: 0.9 + rand() * 0.2,
+      falls: true
+    });
+  });
+  // The rest, ringing the meadow.
+  for (var i = 0; i < 13; i++) {
+    var ang = (i / 13) * Math.PI * 2 + rand() * 0.5;
+    var dist = 60 + rand() * 190;
+    var s = 4.5 + rand() * 9;
+    rockDefs.push({
+      x: Math.cos(ang) * dist,
+      y: s * 1.7 + 22 + rand() * 44,
+      z: Math.sin(ang) * dist,
+      s: s,
+      sy: 0.85 + rand() * 0.4,
+      yaw: rand() * Math.PI * 2,
+      phase: rand() * Math.PI * 2,
+      tint: 0.85 + rand() * 0.3,
+      falls: false
+    });
+  }
+})();
+
+var rockMeshes = [buildFlyingRock(1), buildFlyingRock(2)];
+var flyingRockBatches = rockMeshes.map(function (mesh, mi) {
+  var subset = rockDefs.filter(function (_, i) { return i % 2 === mi; });
+  return uploadMesh(mesh, instanceBuffer(subset.map(function (d) {
+    return { x: d.x, y: d.y, z: d.z, s: d.s, yaw: d.yaw, phase: d.phase, tint: d.tint };
+  }), 1.0));
+});
+
+/* Waterfalls: one curtain per feeder rock, reaching from the rock's
+   underside down into the lake. */
+var fallBatch = (function () {
+  var list = [];
+  rockDefs.forEach(function (d) {
+    if (!d.falls) return;
+    var lipY = d.y - d.s * 0.32;
+    var len = lipY - WATER_LEVEL + 0.6;
+    list.push({
+      x: d.x + (rand() * 2 - 1) * d.s * 0.3,
+      y: lipY,
+      z: d.z + (rand() * 2 - 1) * d.s * 0.3,
+      s: d.s * (0.30 + rand() * 0.16),
+      sy: len,
+      yaw: rand() * Math.PI * 2,
+      phase: rand() * Math.PI * 2,
+      tint: 1.0
+    });
+  });
+  var data = new Float32Array(list.length * 8);
+  list.forEach(function (d, i) {
+    var o = i * 8;
+    data[o] = d.x; data[o + 1] = d.y; data[o + 2] = d.z; data[o + 3] = d.s;
+    data[o + 4] = d.sy; data[o + 5] = d.yaw; data[o + 6] = d.phase; data[o + 7] = d.tint;
+  });
+  return { batch: uploadMesh(buildFall(), data), spots: list };
+})();
+
+/* Spray where each fall hits the water. */
+var sprayBatch = (function () {
+  var list = [];
+  fallBatch.spots.forEach(function (f) {
+    for (var i = 0; i < 90; i++) {
+      var a = rand() * Math.PI * 2;
+      var rr = Math.sqrt(rand()) * f.s * 2.6;
+      list.push({
+        x: f.x + Math.cos(a) * rr,
+        y: WATER_LEVEL + rand() * rand() * 3.4,
+        z: f.z + Math.sin(a) * rr,
+        s: 0.05 + rand() * 0.16,
+        yaw: rand() * Math.PI * 2,
+        phase: rand() * Math.PI * 2,
+        tint: 0.5 + rand() * 0.5
+      });
+    }
+  });
+  return uploadMesh(buildMote(), instanceBuffer(list, 1.0));
+})();
+
+/* --- butterflies --------------------------------------------------------
+   Three colourways, drifting over the flowered parts of the meadow. */
+var butterflyBatches = [
+  buildButterfly(0.960, 0.847, 0.310),   // sulphur yellow
+  buildButterfly(0.980, 0.980, 0.960),   // cabbage white
+  buildButterfly(0.870, 0.435, 0.180)    // fritillary orange
+].map(function (mesh) {
+  var list = [];
+  var n = 0, tries = 0;
+  while (n < 90 && tries++ < 4000) {
+    var x = (rand() * 2 - 1) * 190;
+    var z = (rand() * 2 - 1) * 190;
+    var g = heightAt(x, z);
+    if (g < WATER_LEVEL + 0.5) continue;
+    list.push({
+      x: x, y: g + 0.7 + rand() * 2.2, z: z,
+      s: 0.55 + rand() * 0.42,
+      yaw: rand() * Math.PI * 2,
+      phase: rand() * Math.PI * 2,
+      tint: 0.85 + rand() * 0.3
+    });
+    n++;
+  }
+  return uploadMesh(mesh, instanceBuffer(list, 1.0));
+});
+
+/* =========================================================================
+   10b. The deer herd
+   ========================================================================= */
+var deerMesh = buildDeer(1);
+var HERD = 9;
+var deer = [];
+(function placeHerd() {
+  for (var i = 0; i < HERD; i++) {
+    // Start them as a loose group off to one side of the spawn.
+    var a = rand() * Math.PI * 2, r = 24 + rand() * 46;
+    var x = 62 + Math.cos(a) * r, z = -54 + Math.sin(a) * r;
+    deer.push({
+      x: x, z: z,
+      heading: rand() * Math.PI * 2,
+      speed: 0,
+      walkPhase: rand() * Math.PI * 2,
+      timer: rand() * 6,
+      grazing: true,
+      scale: 0.92 + rand() * 0.26,
+      tint: 0.85 + rand() * 0.3
+    });
+  }
+})();
+
+var deerData = new Float32Array(HERD * 8);
+function writeDeer() {
+  for (var i = 0; i < HERD; i++) {
+    var d = deer[i], o = i * 8;
+    deerData[o] = d.x;
+    deerData[o + 1] = heightAt(d.x, d.z);
+    deerData[o + 2] = d.z;
+    deerData[o + 3] = d.scale;
+    deerData[o + 4] = d.scale;
+    deerData[o + 5] = d.heading;
+    deerData[o + 6] = d.walkPhase;
+    deerData[o + 7] = d.tint;
+  }
+  return deerData;
+}
+var deerBatch = uploadMesh(deerMesh, writeDeer());
+
+/* Wander, graze, and shy away from the player. */
+function updateHerd(dt) {
+  for (var i = 0; i < HERD; i++) {
+    var d = deer[i];
+    var dx = d.x - player.x, dz = d.z - player.z;
+    var near = Math.hypot(dx, dz);
+
+    d.timer -= dt;
+    if (near < 18) {
+      // Spooked: turn away from the player and trot off.
+      d.heading = Math.atan2(dx, dz);
+      d.speed = 5.4;
+      d.grazing = false;
+      d.timer = 2.5 + rand() * 2;
+    } else if (d.timer <= 0) {
+      // Otherwise alternate between grazing and ambling somewhere new.
+      d.grazing = !d.grazing;
+      d.timer = d.grazing ? 4 + rand() * 7 : 2 + rand() * 4;
+      d.speed = d.grazing ? 0 : 1.1 + rand() * 0.9;
+      if (!d.grazing) d.heading += (rand() * 2 - 1) * 1.9;
+    }
+
+    if (d.speed > 0.01) {
+      // The mesh faces -Z, so heading maps to the same convention the
+      // camera uses.
+      var nx = d.x - Math.sin(d.heading) * d.speed * dt;
+      var nz = d.z - Math.cos(d.heading) * d.speed * dt;
+      var lim = WORLD.half - 30;
+      // Turn back at the world edge, and never wade into the lake.
+      if (Math.abs(nx) > lim || Math.abs(nz) > lim ||
+          heightAt(nx, nz) < WATER_LEVEL + 0.6) {
+        d.heading += 2.2;
+      } else {
+        d.x = nx; d.z = nz;
+      }
+      d.walkPhase += dt * (2.2 + d.speed * 1.5);
+      d.speed = Math.max(0, d.speed - dt * 0.55);
+    } else {
+      d.walkPhase += dt * 0.6;   // idle sway while the head is down
+    }
+  }
+  updateInstances(deerBatch, writeDeer());
+}
+
+/* =========================================================================
+   11. First-person controller
+   ========================================================================= */
+var player = {
+  x: 0, y: 0, z: 0,   // the terrain basin and the clearing both centre here
+  vx: 0, vy: 0, vz: 0,
+  yaw: 0,             // facing -Z, into the open meadow
+  pitch: -0.06,
+  grounded: true,
+  bob: 0,
+  bobAmt: 0
+};
+player.y = heightAt(player.x, player.z) + WORLD.eye;
+
+var keys = Object.create(null);
+var locked = false;
+
+/* Day/night. `nightWanted` flips on the key; `night` eases toward it so the
+   sky and the light change over a few seconds rather than snapping. */
+var night = 0;
+var nightWanted = 0;
+
+var cardEl = document.getElementById("card");
+var crossEl = document.getElementById("cross");
+var hudEl = document.getElementById("hud");
+var hintEl = document.getElementById("hint");
+var promptEl = document.getElementById("prompt");
+
+/* Which portal the crosshair is on, or -1. Set once per frame by aimPortals(). */
+var aimed = -1;
+
+function requestLock() {
+  if (locked) return;
+  // Chrome returns a promise here and rejects it if the lock is requested too
+  // soon after an Esc — swallow that so it does not surface as an error. The
+  // start card simply stays up and the next click succeeds.
+  var p = canvas.requestPointerLock();
+  if (p && typeof p.catch === "function") p.catch(function () {});
+}
+
+/* Opening has to happen inside the click or keypress itself — that is the user
+   gesture browsers require before they will allow a new tab. */
+function openAimed() {
+  if (aimed < 0) return false;
+  window.open(PORTALS[aimed].url, "_blank", "noopener");
+  return true;
+}
+
+canvas.addEventListener("click", function () {
+  // While locked the click opens whatever you are looking at; otherwise it is
+  // the click that enters the world. The two cases cannot collide.
+  if (locked) { openAimed(); return; }
+  requestLock();
+});
+cardEl.addEventListener("click", requestLock);
+
+/* Pick the portal nearest the centre of view, within a forgiving cone. */
+function aimPortals() {
+  aimed = -1;
+  if (!locked) { promptEl.classList.remove("on"); crossEl.classList.remove("aim"); return; }
+
+  var cp = Math.cos(player.pitch);
+  var fx = -Math.sin(player.yaw) * cp;
+  var fy = Math.sin(player.pitch);
+  var fz = -Math.cos(player.yaw) * cp;
+
+  var best = 0.978;          // ~12 degrees off centre
+  for (var i = 0; i < PORTALS.length; i++) {
+    var p = PORTALS[i];
+    var dx = p.x - player.x, dy = p.y - player.y, dz = p.z - player.z;
+    var len = Math.hypot(dx, dy, dz);
+    if (len > 30 || len < 0.001) continue;
+    var dot = (dx * fx + dy * fy + dz * fz) / len;
+    if (dot > best) { best = dot; aimed = i; }
+  }
+
+  if (aimed >= 0) {
+    promptEl.textContent = PORTALS[aimed].label + " — click or press E to open";
+    promptEl.classList.add("on");
+    crossEl.classList.add("aim");
+  } else {
+    promptEl.classList.remove("on");
+    crossEl.classList.remove("aim");
+  }
+}
+
+document.addEventListener("pointerlockchange", function () {
+  locked = document.pointerLockElement === canvas;
+  cardEl.classList.toggle("hidden", locked);
+  crossEl.classList.toggle("on", locked);
+  hudEl.classList.toggle("on", locked);
+  hintEl.classList.toggle("on", locked);
+  if (!locked) { keys = Object.create(null); }
+});
+
+document.addEventListener("mousemove", function (e) {
+  if (!locked) return;
+  var sens = 0.0022;
+  player.yaw -= e.movementX * sens;
+  player.pitch -= e.movementY * sens;
+  player.pitch = clamp(player.pitch, -1.5533, 1.5533);   // ±89°
+  if (player.yaw > Math.PI * 2) player.yaw -= Math.PI * 2;
+  if (player.yaw < 0) player.yaw += Math.PI * 2;
+});
+
+window.addEventListener("keydown", function (e) {
+  if (!keys[e.code] && e.code === "KeyN") nightWanted = nightWanted > 0.5 ? 0 : 1;
+  if (!keys[e.code] && e.code === "KeyE") openAimed();
+  keys[e.code] = true;
+  if (e.code === "Space" || e.code.startsWith("Arrow")) e.preventDefault();
+});
+window.addEventListener("keyup", function (e) { keys[e.code] = false; });
+window.addEventListener("blur", function () { keys = Object.create(null); });
+
+function step(dt) {
+  var fwd = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0);
+  var strafe = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0);
+  var sprinting = !!(keys.ShiftLeft || keys.ShiftRight);
+  var target = sprinting ? WORLD.sprint : WORLD.walk;
+
+  // Camera-relative horizontal basis (yaw only — looking up must not slow you down).
+  var sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
+  var dx = 0, dz = 0;
+  if (fwd || strafe) {
+    var il = 1 / Math.hypot(fwd, strafe);
+    fwd *= il; strafe *= il;
+    dx = -sinY * fwd + cosY * strafe;
+    dz = -cosY * fwd - sinY * strafe;
+  }
+
+  // Accelerate toward the desired velocity; less authority while airborne.
+  var accel = player.grounded ? 42 : 9;
+  var wantVX = dx * target, wantVZ = dz * target;
+  player.vx += (wantVX - player.vx) * Math.min(accel * dt, 1);
+  player.vz += (wantVZ - player.vz) * Math.min(accel * dt, 1);
+
+  if (player.grounded && keys.Space) {
+    player.vy = WORLD.jump;
+    player.grounded = false;
+  }
+
+  player.vy -= WORLD.gravity * dt;
+  player.x += player.vx * dt;
+  player.z += player.vz * dt;
+  player.y += player.vy * dt;
+
+  // Keep the player inside the heightfield.
+  var lim = WORLD.half - 6;
+  player.x = clamp(player.x, -lim, lim);
+  player.z = clamp(player.z, -lim, lim);
+
+  // Ground collision against the shared heightfield.
+  var ground = heightAt(player.x, player.z) + WORLD.eye;
+  if (player.y <= ground) {
+    player.y = ground;
+    if (player.vy < 0) player.vy = 0;
+    player.grounded = true;
+  } else if (player.y > ground + 0.06) {
+    player.grounded = false;
+  }
+
+  // Head bob, scaled by ground speed and faded out in the air.
+  var speed = Math.hypot(player.vx, player.vz);
+  var want = player.grounded ? clamp(speed / WORLD.sprint, 0, 1) : 0;
+  player.bobAmt += (want - player.bobAmt) * Math.min(8 * dt, 1);
+  player.bob += dt * (7.0 + speed * 0.55);
+}
+
+/* =========================================================================
+   12. Frame loop
+   ========================================================================= */
+var proj = M4.create();
+var view = M4.create();
+var vp = M4.create();
+var invVP = M4.create();
+var camPos = new Float32Array(3);
+
+function invert4(out, m) {
+  var a00=m[0],a01=m[1],a02=m[2],a03=m[3],
+      a10=m[4],a11=m[5],a12=m[6],a13=m[7],
+      a20=m[8],a21=m[9],a22=m[10],a23=m[11],
+      a30=m[12],a31=m[13],a32=m[14],a33=m[15];
+  var b00=a00*a11-a01*a10, b01=a00*a12-a02*a10, b02=a00*a13-a03*a10,
+      b03=a01*a12-a02*a11, b04=a01*a13-a03*a11, b05=a02*a13-a03*a12,
+      b06=a20*a31-a21*a30, b07=a20*a32-a22*a30, b08=a20*a33-a23*a30,
+      b09=a21*a32-a22*a31, b10=a21*a33-a23*a31, b11=a22*a33-a23*a32;
+  var det = b00*b11 - b01*b10 + b02*b09 + b03*b08 - b04*b07 + b05*b06;
+  if (!det) return out;
+  det = 1 / det;
+  out[0]=(a11*b11-a12*b10+a13*b09)*det;
+  out[1]=(a02*b10-a01*b11-a03*b09)*det;
+  out[2]=(a31*b05-a32*b04+a33*b03)*det;
+  out[3]=(a22*b04-a21*b05-a23*b03)*det;
+  out[4]=(a12*b08-a10*b11-a13*b07)*det;
+  out[5]=(a00*b11-a02*b08+a03*b07)*det;
+  out[6]=(a32*b02-a30*b05-a33*b01)*det;
+  out[7]=(a20*b05-a22*b02+a23*b01)*det;
+  out[8]=(a10*b10-a11*b08+a13*b06)*det;
+  out[9]=(a01*b08-a00*b10-a03*b06)*det;
+  out[10]=(a30*b04-a31*b02+a33*b00)*det;
+  out[11]=(a21*b02-a20*b04-a23*b00)*det;
+  out[12]=(a11*b07-a10*b09-a12*b06)*det;
+  out[13]=(a00*b09-a01*b07+a02*b06)*det;
+  out[14]=(a31*b01-a30*b03-a32*b00)*det;
+  out[15]=(a20*b03-a21*b01+a22*b00)*det;
+  return out;
+}
+
+var dpr = 1, vw = 1, vh = 1;
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  vw = Math.max(1, Math.round(canvas.clientWidth * dpr));
+  vh = Math.max(1, Math.round(canvas.clientHeight * dpr));
+  if (canvas.width !== vw || canvas.height !== vh) {
+    canvas.width = vw;
+    canvas.height = vh;
+  }
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* opts: {sway, inst, foliage, ground, water, fall} — every flag defaults off. */
+function drawBatch(batch, opts) {
+  var o = opts || {};
+  var instanced = !!o.inst;
+  gl.uniform1i(worldProg.u.uSway, o.sway || 0);
+  gl.uniform1i(worldProg.u.uInstanced, instanced ? 1 : 0);
+  gl.uniform1f(worldProg.u.uFoliage, o.foliage ? 1 : 0);
+  gl.uniform1f(worldProg.u.uGround, o.ground ? 1 : 0);
+  gl.uniform1f(worldProg.u.uWater, o.water ? 1 : 0);
+  gl.uniform1f(worldProg.u.uFall, o.fall ? 1 : 0);
+  gl.bindVertexArray(batch.vao);
+  if (instanced) {
+    gl.drawElementsInstanced(gl.TRIANGLES, batch.count, gl.UNSIGNED_INT, 0, batch.instances);
+  } else {
+    gl.drawElements(gl.TRIANGLES, batch.count, gl.UNSIGNED_INT, 0);
+  }
+}
+
+var lastT = 0, accum = 0, elapsed = 0;
+var FIXED = 1 / 120;
+var fpsT = 0, fpsFrames = 0, fps = 0;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+
+  var t = now * 0.001;
+  var dt = lastT ? t - lastT : 0;
+  lastT = t;
+  dt = Math.min(dt, 0.05);          // alt-tab guard
+  elapsed += dt;
+
+  // Fixed-step physics so movement is frame-rate independent.
+  accum += dt;
+  var iter = 0;
+  while (accum >= FIXED && iter++ < 12) {
+    step(FIXED);
+    accum -= FIXED;
+  }
+
+  night += (nightWanted - night) * Math.min(dt * 0.55, 1);
+  updateHerd(dt);
+  aimPortals();
+
+  fpsFrames++;
+  fpsT += dt;
+  if (fpsT >= 0.5) {
+    fps = Math.round(fpsFrames / fpsT);
+    fpsFrames = 0; fpsT = 0;
+    hudEl.textContent =
+      "X " + player.x.toFixed(0) + "   Z " + player.z.toFixed(0) +
+      "   ALT " + (player.y - WORLD.eye).toFixed(0) + "m   " + fps + " fps";
+  }
+
+  resize();
+  gl.viewport(0, 0, vw, vh);
+
+  // Camera with head bob and a touch of speed roll.
+  var bobY = Math.sin(player.bob) * 0.055 * player.bobAmt;
+  var roll = Math.sin(player.bob * 0.5) * 0.012 * player.bobAmt;
+  camPos[0] = player.x;
+  camPos[1] = player.y + bobY;
+  camPos[2] = player.z;
+
+  M4.perspective(proj, 1.20, vw / vh, 0.08, WORLD.far);
+  M4.fromEuler(view, camPos[0], camPos[1], camPos[2], player.yaw, player.pitch, roll);
+  M4.multiply(vp, proj, view);
+  invert4(invVP, vp);
+
+  gl.disable(gl.BLEND);
+
+  /* --- sky --- */
+  gl.depthMask(false);
+  gl.disable(gl.DEPTH_TEST);
+  gl.disable(gl.CULL_FACE);
+  gl.useProgram(skyProg.id);
+  gl.uniformMatrix4fv(skyProg.u.uInvVP, false, invVP);
+  gl.uniform3fv(skyProg.u.uCamPos, camPos);
+  gl.uniform3fv(skyProg.u.uSunDir, SUN_DIR);
+  gl.uniform3fv(skyProg.u.uSkyTop, SKY_TOP);
+  gl.uniform3fv(skyProg.u.uSkyMid, SKY_MID);
+  gl.uniform3fv(skyProg.u.uSkyHorizon, SKY_HORIZ);
+  gl.uniform3fv(skyProg.u.uSunColor, SUN_COLOR);
+  gl.uniform1f(skyProg.u.uNight, night);
+  gl.uniform1f(skyProg.u.uTime, elapsed);
+  gl.bindVertexArray(skyVAO);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  /* --- world --- */
+  gl.depthMask(true);
+  gl.enable(gl.DEPTH_TEST);
+  gl.clear(gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(worldProg.id);
+  gl.uniformMatrix4fv(worldProg.u.uVP, false, vp);
+  gl.uniform3fv(worldProg.u.uCamPos, camPos);
+  gl.uniform3fv(worldProg.u.uSunDir, SUN_DIR);
+  gl.uniform3fv(worldProg.u.uSunColor, SUN_COLOR);
+  gl.uniform3fv(worldProg.u.uFogColor, FOG_COLOR);
+  gl.uniform3fv(worldProg.u.uSkyTop, SKY_TOP);
+  gl.uniform1f(worldProg.u.uFogDensity, 0.0021);
+  gl.uniform1f(worldProg.u.uNight, night);
+  gl.uniform1f(worldProg.u.uTime, elapsed);
+
+  gl.enable(gl.CULL_FACE);
+  gl.cullFace(gl.BACK);
+  drawBatch(gpuTerrain, { ground: true });
+  rockBatches.forEach(function (b) { drawBatch(b, { inst: true }); });
+  flyingRockBatches.forEach(function (b) { drawBatch(b, { sway: 5, inst: true }); });
+  drawBatch(deerBatch, { sway: 3, inst: true });
+
+  // Foliage is single-sided ribbons — draw both faces, and let the low sun
+  // shine through them.
+  gl.disable(gl.CULL_FACE);
+  treeBatches.forEach(function (b) { drawBatch(b, { sway: 1, inst: true, foliage: true }); });
+  fernBatches.forEach(function (b) { drawBatch(b, { sway: 1, inst: true, foliage: true }); });
+  grassBatches.forEach(function (b) { drawBatch(b, { sway: 1, inst: true, foliage: true }); });
+  daisyBatches.forEach(function (b) { drawBatch(b, { sway: 1, inst: true, foliage: true }); });
+  butterflyBatches.forEach(function (b) { drawBatch(b, { sway: 4, inst: true, foliage: true }); });
+  drawBatch(moteBatch, { sway: 2, inst: true });
+
+  /* --- water, drawn last so everything shows through it --- */
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.depthMask(false);
+  drawBatch(fallBatch.batch, { fall: true, inst: true });
+  drawBatch(sprayBatch, { sway: 2, inst: true });
+  drawBatch(waterBatch, { sway: 6, water: true });
+
+  /* --- the link portals, last of all so their glow lies over everything --- */
+  gl.useProgram(portalProg.id);
+  gl.uniformMatrix4fv(portalProg.u.uVP, false, vp);
+  gl.uniform3fv(portalProg.u.uCamPos, camPos);
+  gl.uniform3fv(portalProg.u.uFogColor, FOG_COLOR);
+  gl.uniform1f(portalProg.u.uFogDensity, 0.0021);
+  gl.uniform1f(portalProg.u.uNight, night);
+  gl.uniform1f(portalProg.u.uTime, elapsed);
+  gl.uniform1f(portalProg.u.uAimed, aimed);
+  gl.uniform1i(portalProg.u.uCount, PORTALS.length);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, labelTex);
+  gl.uniform1i(portalProg.u.uLabels, 0);
+  gl.bindVertexArray(portalVAO);
+  gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, PORTALS.length);
+
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
+
+  gl.bindVertexArray(null);
+}
+
+gl.enable(gl.DEPTH_TEST);
+gl.depthFunc(gl.LEQUAL);
+gl.clearColor(FOG_COLOR[0], FOG_COLOR[1], FOG_COLOR[2], 1);
+requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+# Per-machine Claude Code overrides (the shared settings.json stays tracked)
+.claude/settings.local.json
+
+# OS clutter
+Thumbs.db
+.DS_Store
