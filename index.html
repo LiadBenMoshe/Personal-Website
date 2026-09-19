@@ -1765,6 +1765,10 @@ var PORTALS = [
   { label: "PROFIT CALCULATOR", url: "https://square-math-bd83.liadbenmoshe10.workers.dev/" },
   { label: "HALPERIN RUSSIAN STUDY", url: "https://halperin.lbm-study.com/" },
   { label: "TENON WFP INSTALLER", url: "https://www.nuget.org/packages/tenon" },
+  { label: "YOUTUBE CHANNEL",     url: "https://www.youtube.com/@liadbenmoshe8770" },
+  // The no-break space keeps the title together on the first line: bakeLabels
+  // wraps after the first ordinary space.
+  { label: "“The Baby” UNITY GAME", url: "https://lba-universe.itch.io/baby" },
   // An entry with `action` instead of `url` does something in the world. Keep
   // these after the links: the fan's spacing and stagger run off the link index.
   { label: "SKY DIVE", action: "sky" }
@@ -2086,9 +2090,10 @@ var waterBatch = uploadMesh(buildWater(), null);
    all of them are in view the moment you enter and each is a few steps away. */
 var portalVAO = null;
 (function placePortals() {
-  // Radians the fan spans. Seven panels need ~5 m between centres to keep their
-  // halos apart; 1.50 is as wide as that goes while staying inside a 16:9 FOV.
-  var arc = 1.50;
+  // Radians the fan spans: as wide as fits a 16:9 FOV. Nine panels would
+  // overlap along one arc, so they alternate between two rows — same-row
+  // neighbours are then two steps (~8 m) apart.
+  var arc = 1.56;
   var links = PORTALS.filter(function (p) { return !!p.url; });
   PORTALS.forEach(function (p, i) {
     if (p.action) {
@@ -2109,7 +2114,7 @@ var portalVAO = null;
     // Spawn faces -Z, so the fan opens along -Z.
     p.x = Math.sin(a) * dist;
     p.z = -Math.cos(a) * dist;
-    p.y = heightAt(p.x, p.z) + 2.6 + (i % 2) * 1.15;   // stagger so they do not crowd
+    p.y = heightAt(p.x, p.z) + 2.6 + (i % 2) * 2.5;    // the two rows
     p.hw = 1.95;
     p.hh = 1.15;
     p.phase = i * 1.7;
